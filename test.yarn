@@ -16,6 +16,14 @@ Player: I want to buy a cake!
 -> Incredible!
 	Bar: baz
 -> I'm amazed!
+	Bar: Wow you sure are! Here's a nested thing
+	-> opt 1
+		Baz: You selected 1
+	-> opt 2
+		Baz: You selected 2
+	-> opt 3
+		Baz: You selected 3
+	<<$ ppc 5 + getResponse goto>>
 <<$ ppc 5 + getResponse goto>>
 
 Anyway, time to get writing!
