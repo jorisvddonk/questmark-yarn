@@ -74,6 +74,10 @@ export class Listener implements YarnSpinnerParserListener {
         this.indentLevels.push(indents.length);
         let dedents = z.filter(e => e.type === YarnSpinnerParser.DEDENT);
     }
+    
+    exitShortcut_option_statement (ctx: Shortcut_option_statementContext) {
+        this.qTzo(TZO_QVM_get_response);
+    }
 
     exitShortcut_option(ctx: Shortcut_optionContext) {
         this.q(invokeFunction("goto")); // go back to where we were before "getResponse" was called

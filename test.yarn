@@ -23,8 +23,6 @@ Player: I want to buy a cake!
 		Baz: You selected 2
 	-> opt 3
 		Baz: You selected 3
-	<<RESPONSE>>
-<<RESPONSE>>
 
 Anyway, time to get writing!
 
@@ -32,7 +30,6 @@ Anyway, time to get writing!
 	<<jump Start>>
 -> Go outside
 	<<jump Outside>>
-<<RESPONSE>>
 ===
 
 title: Outside
@@ -40,7 +37,6 @@ title: Outside
 You are now outside!
 
 -> Yay
-<<RESPONSE>>
 
 Foobar.
 
