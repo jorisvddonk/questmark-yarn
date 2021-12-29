@@ -1,22 +1,33 @@
 {
   "name": "questmark-yarn",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "",
-  "main": "index.js",
+  "main": "dist/node/index.js",
+  "types": "dist/node/index.d.js",
+  "exports": {
+    ".": {
+      "import": "./dist/node/index.js",
+      "require": "./dist/browser/index.js"
+    }
+  },
   "scripts": {
     "prepublishOnly": "npm run build",
-    "build": "tsc",
+    "build": "npx cross-env rm -rf dist/ && tsc -p tsconfig.json && tsc -p tsconfig-browser.json",
     "test": "ts-node src/test.ts",
-    "start": "ts-node src/index.ts",
+    "start": "ts-node src/cli.ts",
     "fix_antlr_grammar_ts": "ts-node src/util/fix_antlr_grammar_ts.ts",
     "antlr4ts-yarnspinnerlexer": "antlr4ts -visitor grammars/YarnSpinnerLexer.g4",
     "antlr4ts-yarnspinnerparser": "antlr4ts -visitor grammars/YarnSpinnerParser.g4",
     "antlr4ts": "npm run antlr4ts-yarnspinnerlexer && npm run antlr4ts-yarnspinnerparser && npm run fix_antlr_grammar_ts"
   },
+  "bin": {
+    "questmark": "./bin/questmark-yarn.mjs"
+  },
   "author": "",
   "license": "ISC",
   "dependencies": {
     "antlr4ts": "^0.5.0-alpha.4",
+    "node-fetch": "^2.6.6",
     "tzo": "^1.0.19",
     "unist-builder": "^2.0.3"
   },
