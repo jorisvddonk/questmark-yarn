@@ -32,6 +32,11 @@ const qvmState = u("questmarkVMState", {
 const q = (a: InvokeFunctionInstruction | PushStringInstruction | PushNumberInstruction) => {
     qvmState.programList.push(a);
 }
+const qTzo = (input: string) => {
+    tzoTokenizer.parse(input).forEach(i => q(i));
+}
+
+const TZO_cleanstack = `stacksize jgz { pop } stacksize jgz { 9 ppc - goto }`;
 
 class Listener implements YarnSpinnerParserListener {
     indentLevels: number[] = [];
@@ -89,12 +94,12 @@ class Listener implements YarnSpinnerParserListener {
         //q(invokeFunction(ctx.COMMAND_TEXT().join("")));
         let text = ctx.COMMAND_TEXT().join("");
         if (text.startsWith("$")) {
-            tzoTokenizer.parse(text.substring(1)).forEach(i => q(i));
+            qTzo(text.substring(1));
         }
     }
 
     enterJump_statement(ctx: Jump_statementContext) {
-        q(invokeFunction("pop")); // TODO: do this only if inside of an option body...
+        qTzo(TZO_cleanstack);
         q(pushString(ctx.ID().text));
         q(invokeFunction("goto"));
     }
@@ -130,11 +135,11 @@ class Listener implements YarnSpinnerParserListener {
         let comparison = ctx.expression().children[1].text;
         let comparator = ctx.expression().children[2].text;
 
-        tzoTokenizer.parse(comparator).forEach(i => q(i));
+        qTzo(comparator);
 
         if (variable.startsWith("$")) {
             let v = variable.replaceAll(/\$(\S+)/g, (a, b) => `"${b}" getContext`);
-            tzoTokenizer.parse(v).forEach(i => q(i));
+            qTzo(v);
         } else {
             console.warn("UNIMPLEMENTED: if statement variable is a complex expression!");
         }
