@@ -1,6 +1,6 @@
 # QuestMark-Yarn
 
-This is a very experimental compiler from [Yarn Spinner 2.0](https://yarnspinner.dev/) to the [QuestMark QuestVM (Tzo)](https://github.com/jorisvddonk/questmark) specification.
+This is a very experimental compiler from [Yarn Spinner 2.0](https://yarnspinner.dev/) to the [QuestMark QuestVM (Tzo)](https://github.com/jorisvddonk/questmark) specification, which allows Yarn Spinner scripts to be executed in a wide variety of environments for which there is a [Tzo](https://github.com/jorisvddonk/tzo) or QuestVM implementation (currently: C, TypeScript, Rust - though creating one for another language isn't particularly difficult due to the simple nature of the Tzo VM)
 
 Not everything is supported, but basic scripts might work, with some modifications
 
