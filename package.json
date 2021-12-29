@@ -23,8 +23,8 @@
   "bin": {
     "questmark": "./bin/questmark-yarn.mjs"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "Joris van de Donk <jorisvddonk@gmail.com>",
+  "license": "MIT",
   "dependencies": {
     "antlr4ts": "^0.5.0-alpha.4",
     "node-fetch": "^2.6.6",
