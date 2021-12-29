@@ -1,13 +1,39 @@
 title: Start
 ---
 Qwe: Wow!
-Asd: My first ever Yarn script in Unity!
+Asd: My first ever Yarn script!
+
+<<set $gold_amount to 5>>
+
+Player: I want to buy a cake!
+
+<<if $gold_amount < 10>>
+    Baker: Well, you can't afford one!
+<<endif>>
 
 -> Gosh!
 	Foo: Awesome!
 -> Incredible!
-Bar: baz
+	Bar: baz
 -> I'm amazed!
+<<$ ppc 5 + getResponse goto>>
 
 Anyway, time to get writing!
+
+-> Go again
+	<<jump Start>>
+-> Go outside
+	<<jump Outside>>
+<<$ ppc 5 + getResponse goto>>
+===
+
+title: Outside
+---
+You are now outside!
+
+-> Yay
+<<$ ppc 5 + getResponse goto>>
+
+Foobar.
+
 ===

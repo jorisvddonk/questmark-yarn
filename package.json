@@ -16,7 +16,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "antlr4ts": "^0.5.0-alpha.4"
+    "antlr4ts": "^0.5.0-alpha.4",
+    "tzo": "^1.0.19",
+    "unist-builder": "^2.0.3"
   },
   "devDependencies": {
     "@types/glob": "^7.2.0",
