@@ -1,0 +1,29 @@
+{
+  "name": "questmark-yarn",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "prepublishOnly": "npm run build",
+    "build": "tsc",
+    "test": "ts-node src/test.ts",
+    "start": "ts-node src/index.ts",
+    "fix_antlr_grammar_ts": "ts-node src/util/fix_antlr_grammar_ts.ts",
+    "antlr4ts-yarnspinnerlexer": "antlr4ts -visitor grammars/YarnSpinnerLexer.g4",
+    "antlr4ts-yarnspinnerparser": "antlr4ts -visitor grammars/YarnSpinnerParser.g4",
+    "antlr4ts": "npm run antlr4ts-yarnspinnerlexer && npm run antlr4ts-yarnspinnerparser && npm run fix_antlr_grammar_ts"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "antlr4ts": "^0.5.0-alpha.4"
+  },
+  "devDependencies": {
+    "@types/glob": "^7.2.0",
+    "@types/node": "^17.0.5",
+    "antlr4ts-cli": "^0.5.0-alpha.4",
+    "glob": "^7.2.0",
+    "ts-node": "^10.4.0",
+    "typescript": "^4.5.4"
+  }
+}

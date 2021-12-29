@@ -1,0 +1,1 @@
+From: https://github.com/YarnSpinnerTool/YarnSpinner/tree/86b07d091ab7f5a0651391f551a4140a01bfa886/YarnSpinner.Compiler
