@@ -37,7 +37,7 @@ const qTzo = (input: string) => {
 }
 
 const TZO_cleanstack = `stacksize jgz { pop } stacksize jgz { 9 ppc - goto }`;
-
+const TZO_QVM_get_response = `ppc 5 + getResponse goto`;
 class Listener implements YarnSpinnerParserListener {
     indentLevels: number[] = [];
     // Assuming a parser rule with name: `functionDeclaration`
@@ -95,6 +95,8 @@ class Listener implements YarnSpinnerParserListener {
         let text = ctx.COMMAND_TEXT().join("");
         if (text.startsWith("$")) {
             qTzo(text.substring(1));
+        } else if (text.trim() == "RESPONSE") {
+            qTzo(TZO_QVM_get_response);
         }
     }
 
