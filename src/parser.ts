@@ -1,5 +1,5 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
-import { Command_formatted_textContext, HeaderContext, If_clauseContext, If_statementContext, Jump_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser } from './grammars/YarnSpinnerParser'
+import { Command_formatted_textContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, Jump_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
 import { ANTLRInputStream, CommonTokenStream, TokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
@@ -176,13 +176,22 @@ export class Listener implements YarnSpinnerParserListener {
     }
 
     enterIf_statement(ctx: If_statementContext) {
-
+        let ifCtx = undefined;
+        let elseCtx = undefined;
+        ctx.children.forEach(c => {
+            if ((c as any).ruleIndex === YarnSpinnerParser.RULE_if_clause) {
+                ifCtx = c;
+            } else if ((c as any).ruleIndex === YarnSpinnerParser.RULE_else_clause) {
+                elseCtx = c;
+            }
+        });
+        this.handleIfElse(ifCtx, elseCtx);
     }
 
-    enterIf_clause(ctx: If_clauseContext) {
-        let variable = ctx.expression().children[0]?.text;
-        let comparison = ctx.expression().children[1]?.text;
-        let comparator = ctx.expression().children[2]?.text;
+    handleIfElse(ifStatement?: If_clauseContext, elseStatement?: Else_clauseContext) {
+        let variable = ifStatement.expression().children[0]?.text;
+        let comparison = ifStatement.expression().children[1]?.text;
+        let comparator = ifStatement.expression().children[2]?.text;
 
         let v = variable.replaceAll(/\$(\S+)/g, (a, b) => `"${b}" getContext`);
 
@@ -213,11 +222,23 @@ export class Listener implements YarnSpinnerParserListener {
             this.q(invokeFunction("gt"));
         }
 
+        if (elseStatement !== undefined) {
+            this.q(invokeFunction("dup"));
+        }
         this.q(invokeFunction("jgz"));
         this.q(invokeFunction("{"));
     }
 
     exitIf_clause (ctx: If_clauseContext) {
+        this.q(invokeFunction("}"));
+    }
+
+    enterElse_clause (ctx: Else_clauseContext) {
+        this.q(invokeFunction("jz"));
+        this.q(invokeFunction("{"));
+    }
+
+    exitElse_clause (ctx: Else_clauseContext) {
         this.q(invokeFunction("}"));
     }
 

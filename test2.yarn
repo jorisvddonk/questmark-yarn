@@ -1,7 +1,10 @@
 title: Start
 ---
 Test
-<<set $foo to true>>
+<<set $foo to false>>
 <<if $foo>>
     Foo is true!
+<<else>>
+    Foo is false!
 <<endif>>
+===
