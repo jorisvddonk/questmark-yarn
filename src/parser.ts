@@ -1,5 +1,5 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
-import { Command_formatted_textContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, Jump_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser } from './grammars/YarnSpinnerParser'
+import { Command_formatted_textContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, Jump_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
 import { ANTLRInputStream, CommonTokenStream, TokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
@@ -142,6 +142,11 @@ export class Listener implements YarnSpinnerParserListener {
 
     enterValueNumber(ctx: ValueNumberContext) {
         this.q(pushNumber(Number.parseInt(ctx.NUMBER().text)));
+    }
+
+    enterValueString (ctx: ValueStringContext) {
+        let t = ctx.STRING().text
+        this.q(pushString(t.substring(1, t.length-1)));
     }
 
     enterValueTrue(ctx: ValueTrueContext) {

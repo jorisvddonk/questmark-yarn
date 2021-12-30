@@ -1,0 +1,6 @@
+title: Start
+---
+<<set $name to "Zelnick">>
+<<set $starship to "Vindicator">>
+Hello, captain {$name} of the starship {$starship}!
+===
