@@ -1,5 +1,5 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
-import { Command_formatted_textContext, HeaderContext, If_clauseContext, If_statementContext, Jump_statementContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueNumberContext, YarnSpinnerParser } from './grammars/YarnSpinnerParser'
+import { Command_formatted_textContext, HeaderContext, If_clauseContext, If_statementContext, Jump_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueNumberContext, VariableContext, YarnSpinnerParser } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
 import { ANTLRInputStream, CommonTokenStream, TokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
@@ -36,13 +36,39 @@ export class Listener implements YarnSpinnerParserListener {
         this.tzoTokenizer.parse(input).forEach(i => this.q(i));
     }
 
-    enterLine_statement(context: Line_statementContext) {
+    enterLine_formatted_text (ctx: Line_formatted_textContext) {
+        let text = ctx.TEXT().join("");
+        let rconcats = -1;
+        let in_expr = false;
+        ctx.children.forEach(c => {
+            let z = (c as any)?._symbol?.type;
+            if (z === YarnSpinnerLexer.TEXT) {
+                this.q(pushString(this.tokenStream.getTokens()[(c as any)._symbol.index].text));
+                rconcats += 1;
+            } else if (z === YarnSpinnerLexer.EXPRESSION_START) {
+                in_expr = true;
+            } else if (z === YarnSpinnerLexer.EXPRESSION_END) {
+                in_expr = false;
+            } else if (in_expr) {
+                this.qTzo(c.text.replaceAll(/\$(\S+)/g, (a, b) => `"${b}" getContext`));
+                rconcats += 1; // TODO: determine if this should be bigger for complex expressions?
+            }
+        });
+        while (rconcats > 0) {
+            rconcats -= 1;
+            this.q(invokeFunction("rconcat"));
+        }
+        console.log("---", text);
+    }
+
+    enterText
+
+    exitLine_statement(context: Line_statementContext) {
         let text = context.line_formatted_text().TEXT().join("");
         switch (context._parent?.ruleIndex) {
             case YarnSpinnerParser.RULE_shortcut_option:
             case YarnSpinnerParser.RULE_shortcut_option_statement:
                 console.log(`option [${this.getIndentLevel()}] ${text}`);
-                this.q(pushString(text));
                 this.q(invokeFunction("ppc")); // push address of effect body to stack
                 this.q(pushNumber(4));
                 this.q(invokeFunction("+"));
@@ -51,7 +77,8 @@ export class Listener implements YarnSpinnerParserListener {
             case YarnSpinnerParser.RULE_line_statement:
             case YarnSpinnerParser.RULE_statement:
                 console.log(`line [${this.getIndentLevel()}] ${text}`)
-                this.q(pushString(text + "\n"));
+                this.q(pushString("\n")); // add a newline to ensure things are displayed properly.
+                this.q(invokeFunction("rconcat"));
                 this.q(invokeFunction("emit"));
                 break;
             default:
@@ -84,9 +111,6 @@ export class Listener implements YarnSpinnerParserListener {
         this.q(invokeFunction("}")); // option effect body end
         this.q(invokeFunction("response"));
         this.indentLevels.pop();
-        /*if (this.getIndentLevel() === 0) { // doesn't work!!!
-            q(invokeFunction("getResponse")); // TODO: this is obviously incorrect. Find a better way to find the last option in a list of options!
-        }*/
     }
 
     enterCommand_formatted_text(ctx: Command_formatted_textContext) {
@@ -118,6 +142,22 @@ export class Listener implements YarnSpinnerParserListener {
 
     enterValueNumber(ctx: ValueNumberContext) {
         this.q(pushNumber(Number.parseInt(ctx.NUMBER().text)));
+    }
+    
+    enterVariable (ctx: VariableContext) {
+        let node = ctx._parent;
+        while(node && node.ruleIndex !== YarnSpinnerParser.RULE_line_statement) {
+            node = node._parent;
+        }
+        if (node && node.ruleIndex === YarnSpinnerParser.RULE_line_statement) {
+            // this variable is part of a line statement, so emit its value!
+            // no longer needed - already done as part of lineStatement earlier!
+            /*
+            this.q(pushString(ctx.VAR_ID().text.substring(1)));
+            this.q(invokeFunction("getContext"));
+            this.q(invokeFunction("emit")); // TODO: change to rconcat instead?
+            */
+        }
     }
 
     exitSet_statement(ctx: Set_statementContext) {

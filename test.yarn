@@ -8,7 +8,7 @@ Asd: My first ever Yarn script!
 Player: I want to buy a cake!
 
 <<if $gold_amount < 10>>
-    Baker: Well, you can't afford one!
+    Baker: Well, you can't afford one, as you only have {$gold_amount} gold!
 <<endif>>
 
 -> Gosh!
