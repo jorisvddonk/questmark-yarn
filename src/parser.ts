@@ -1,5 +1,5 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
-import { Command_formatted_textContext, HeaderContext, If_clauseContext, If_statementContext, Jump_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueNumberContext, VariableContext, YarnSpinnerParser } from './grammars/YarnSpinnerParser'
+import { Command_formatted_textContext, HeaderContext, If_clauseContext, If_statementContext, Jump_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
 import { ANTLRInputStream, CommonTokenStream, TokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
@@ -143,6 +143,14 @@ export class Listener implements YarnSpinnerParserListener {
     enterValueNumber(ctx: ValueNumberContext) {
         this.q(pushNumber(Number.parseInt(ctx.NUMBER().text)));
     }
+
+    enterValueTrue(ctx: ValueTrueContext) {
+        this.q(pushNumber(1));
+    }
+
+    enterValueFalse(ctx: ValueFalseContext) {
+        this.q(pushNumber(0));
+    }
     
     enterVariable (ctx: VariableContext) {
         let node = ctx._parent;
@@ -172,30 +180,45 @@ export class Listener implements YarnSpinnerParserListener {
     }
 
     enterIf_clause(ctx: If_clauseContext) {
-        let variable = ctx.expression().children[0].text;
-        let comparison = ctx.expression().children[1].text;
-        let comparator = ctx.expression().children[2].text;
+        let variable = ctx.expression().children[0]?.text;
+        let comparison = ctx.expression().children[1]?.text;
+        let comparator = ctx.expression().children[2]?.text;
 
-        this.qTzo(comparator);
+        let v = variable.replaceAll(/\$(\S+)/g, (a, b) => `"${b}" getContext`);
 
-        if (variable.startsWith("$")) {
-            let v = variable.replaceAll(/\$(\S+)/g, (a, b) => `"${b}" getContext`);
-            this.qTzo(v);
+        if (comparison !== undefined && comparator !== undefined) {
+            this.qTzo(comparator);
+            
+            if (variable.startsWith("$")) {
+                this.qTzo(v);
+            } else {
+                console.warn("UNIMPLEMENTED: if statement variable is a complex expression!");
+            }
+            
+            if (comparison == "<") {
+                this.q(invokeFunction("lt"));
+            } else if (comparison == ">") {
+                this.q(invokeFunction("gt"));
+            } else if (comparison == "=") {
+                this.q(invokeFunction("eq"));
+            } else if (comparison == "==") {
+                this.q(invokeFunction("eq"));
+            } else {
+                console.warn("UNIMPLEMENTED comparison:", comparison);
+            }
         } else {
-            console.warn("UNIMPLEMENTED: if statement variable is a complex expression!");
-        }
-
-        if (comparison == "<") {
-            this.q(invokeFunction("lt"));
-        } else if (comparison == ">") {
+            // boolean comparison; check if the value is greater than 0 (truthy)!
+            this.q(pushNumber(0)) // comparator
+            this.qTzo(v); // variable
             this.q(invokeFunction("gt"));
-        } else if (comparison == "=") {
-            this.q(invokeFunction("eq"));
-        } else if (comparison == "==") {
-            this.q(invokeFunction("eq"));
-        } else {
-            console.warn("UNIMPLEMENTED comparison:", comparison);
         }
+
+        this.q(invokeFunction("jgz"));
+        this.q(invokeFunction("{"));
+    }
+
+    exitIf_clause (ctx: If_clauseContext) {
+        this.q(invokeFunction("}"));
     }
 
     getQVMState() {

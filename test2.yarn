@@ -1,0 +1,7 @@
+title: Start
+---
+Test
+<<set $foo to true>>
+<<if $foo>>
+    Foo is true!
+<<endif>>
