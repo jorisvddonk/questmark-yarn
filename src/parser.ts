@@ -13,6 +13,8 @@ const TZO_QVM_get_response = `ppc 5 + getResponse goto`;
 export class Listener implements YarnSpinnerParserListener {
     tzoTokenizer = new Tokenizer();
     indentLevels: number[] = [];
+    foundFirstNode = false;
+
     qvmState = u("questmarkVMState", {
         stack: [],
         context: {},
@@ -30,6 +32,10 @@ export class Listener implements YarnSpinnerParserListener {
 
     q(a: InvokeFunctionInstruction | PushStringInstruction | PushNumberInstruction) {
         this.qvmState.programList.push(a);
+    }
+
+    preq(a: InvokeFunctionInstruction | PushStringInstruction | PushNumberInstruction) {
+        this.qvmState.programList.unshift(a);
     }
 
     qTzo(input: string) {
@@ -130,13 +136,27 @@ export class Listener implements YarnSpinnerParserListener {
     }
 
     enterNode(ctx: NodeContext) {
+        // we have to wrap guards around nodes to prevent running into other nodes...
+        this.q(invokeFunction("{"));
+    }
+
+    exitNode(ctx: NodeContext) {
+        // we have to wrap guards around nodes to prevent running into other nodes...
+        this.q(invokeFunction("}"));
     }
 
     enterHeader(ctx: HeaderContext) {
         if (ctx.ID().text.toLowerCase() === "title") {
+            let id = ctx.REST_OF_LINE().text;
             let z = invokeFunction("nop");
-            z.label = ctx.REST_OF_LINE().text
+            z.label = id;
             this.q(z);
+            if (this.foundFirstNode === false) {
+                this.foundFirstNode = true;
+                // note: reverse order of these items below, as they're prepended
+                this.preq(invokeFunction("goto"));
+                this.preq(pushString(id));
+            }
         }
     }
 
