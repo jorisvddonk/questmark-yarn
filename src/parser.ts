@@ -1,9 +1,8 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
 import { Command_formatted_textContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, Jump_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
-import { ANTLRInputStream, CommonTokenStream, TokenStream } from 'antlr4ts';
+import { ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
-import * as fs from "fs";
 import u from "unist-builder";
 import { InvokeFunctionInstruction, PushNumberInstruction, PushStringInstruction, TzoVMState } from "tzo";
 import { Tokenizer, pushString, pushNumber, invokeFunction } from "tzo";

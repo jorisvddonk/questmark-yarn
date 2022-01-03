@@ -2,3 +2,5 @@ node_modules/
 .antlr
 .vscode/
 dist/
+_temp/
+.DS_Store
