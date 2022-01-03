@@ -7,7 +7,7 @@ import fetch from "node-fetch";
 import { parse } from "./parser";
 
 program
-    .version('0.0.3')
+    .version('0.0.5')
     .option('--input <path>', "Load source .yarn file from path. Path can be either from local filesystem, or via HTTP(S) URL")
     .option('--output <path>', "Emit VMState .json file")
     .parse(process.argv);
