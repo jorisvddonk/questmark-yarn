@@ -33,7 +33,7 @@ module.exports = {
         fallback: { fs: false }
     },
     optimization: {
-        minimize: false,
+        minimize: true,
         mangleExports: false,
         minimizer: [
             new TerserPlugin({
