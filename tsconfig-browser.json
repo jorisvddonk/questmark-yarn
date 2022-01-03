@@ -1,9 +1,9 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "UMD",
     "declarationDir": "./dist/browser",
     "outDir": "./dist/browser",
-    "target": "es2015"
+    "target": "es6"
   }
 }
