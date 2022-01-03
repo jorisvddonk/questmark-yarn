@@ -12,7 +12,7 @@
   },
   "scripts": {
     "prepublishOnly": "npm run build",
-    "build": "npx cross-env rm -rf dist/ && tsc -p tsconfig.json && tsc -p tsconfig-browser.json",
+    "build": "npx cross-env rm -rf dist/ && tsc -p tsconfig.json && npm run webpack",
     "test": "ts-node src/test.ts",
     "start": "ts-node src/cli.ts",
     "webpack": "webpack",
