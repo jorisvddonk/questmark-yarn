@@ -1,7 +1,7 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
 import { Command_formatted_textContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, Jump_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
-import { ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
+import { ANTLRErrorListener, ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
 import u from "unist-builder";
 import { InvokeFunctionInstruction, PushNumberInstruction, PushStringInstruction, TzoVMState } from "tzo";
@@ -63,17 +63,15 @@ export class Listener implements YarnSpinnerParserListener {
             rconcats -= 1;
             this.q(invokeFunction("rconcat"));
         }
-        console.log("---", text);
+        //console.log("---", text);
     }
-
-    enterText
 
     exitLine_statement(context: Line_statementContext) {
         let text = context.line_formatted_text().TEXT().join("");
         switch (context._parent?.ruleIndex) {
             case YarnSpinnerParser.RULE_shortcut_option:
             case YarnSpinnerParser.RULE_shortcut_option_statement:
-                console.log(`option [${this.getIndentLevel()}] ${text}`);
+                //console.log(`option [${this.getIndentLevel()}] ${text}`);
                 this.q(invokeFunction("ppc")); // push address of effect body to stack
                 this.q(pushNumber(4));
                 this.q(invokeFunction("+"));
@@ -81,13 +79,13 @@ export class Listener implements YarnSpinnerParserListener {
                 break;
             case YarnSpinnerParser.RULE_line_statement:
             case YarnSpinnerParser.RULE_statement:
-                console.log(`line [${this.getIndentLevel()}] ${text}`)
+                //console.log(`line [${this.getIndentLevel()}] ${text}`)
                 this.q(pushString("\n")); // add a newline to ensure things are displayed properly.
                 this.q(invokeFunction("rconcat"));
                 this.q(invokeFunction("emit"));
                 break;
             default:
-                console.log(`?? [${this.getIndentLevel()}] ${text}`)
+                console.warn(`?? [${this.getIndentLevel()}] ${text}`)
 
                 break;
         }
@@ -271,15 +269,22 @@ export class Listener implements YarnSpinnerParserListener {
     }
 }
 
-export function parse(input: string) {
+export function parse(input: string, errorListener?: ANTLRErrorListener<any>) {
     // Create the lexer and parser
     let inputStream = new ANTLRInputStream(input);
     let lexer = new YarnSpinnerLexer(inputStream);
     let tokenStream = new CommonTokenStream(lexer as any);
     let parser = new YarnSpinnerParser(tokenStream);
+    if (errorListener !== null) {
+        parser.addErrorListener(errorListener);
+    }
     let tree = parser.dialogue();
     const listener = new Listener(tokenStream);
     ParseTreeWalker.DEFAULT.walk(listener as YarnSpinnerParserListener, tree)
     console.log(lexer.Warnings);
-    return listener.getQVMState();
+    return {
+        vmState: listener.getQVMState(),
+        warnings: lexer.Warnings,
+        tokens: tokenStream.getTokens()
+    }
 }

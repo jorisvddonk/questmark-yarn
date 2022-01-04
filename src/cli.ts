@@ -7,7 +7,7 @@ import fetch from "node-fetch";
 import { parse } from "./parser";
 
 program
-    .version('0.0.6')
+    .version('0.0.7')
     .option('--input <path>', "Load source .yarn file from path. Path can be either from local filesystem, or via HTTP(S) URL")
     .option('--output <path>', "Emit VMState .json file")
     .parse(process.argv);
@@ -34,7 +34,7 @@ async function load() {
     let vmState: TzoVMState = undefined;
 
     if (program.input.endsWith(".yarn") || program.input.endsWith(".yarn.html")) {
-        vmState = parse(input_file);
+        vmState = parse(input_file).vmState;
     } else {
         throw new Error("Program input file needs to have .json or .yarn / .yarn.html extension!")
     }

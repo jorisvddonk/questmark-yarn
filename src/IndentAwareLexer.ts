@@ -6,7 +6,7 @@
 
 import { CharStream, CommonToken, Lexer, Token, TokenSource, Vocabulary } from "antlr4ts";
 
-interface Warning {
+export interface Warning {
     token: Token,
     message: String
 }
