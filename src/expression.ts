@@ -30,6 +30,12 @@ export type EmitInstruction = (i: PushNumberInstruction | PushStringInstruction 
 // `yarn.<name>`.
 export const YARN_FUNCTION_PREFIX = "yarn.";
 
+// Context key under which a node's visit count is stored. Written by the
+// compiler at node exit, read by the inlined `visited`/`visited_count`.
+export function nodeVisitCountKey(nodeName: string): string {
+    return `$Yarn.Internal.NodeVisitCount.${nodeName}`;
+}
+
 // Tzo's binary opcodes follow the convention "top-of-stack OP second-on-stack".
 // Yarn expressions are left-associative, so we push the right operand first and
 // the left operand second; the left operand then ends up on top.
@@ -167,13 +173,36 @@ export class ExpressionCompiler {
     }
 
     private compileFunctionCall(ctx: Function_callContext): void {
+        const name = ctx.FUNC_ID().text;
         const args = ctx.expression();
+
+        // `visited`/`visited_count` with a literal node name are desugared to
+        // context lookups; the compiler initialises all node visit counters at
+        // startup and increments them when a node is left.
+        if ((name === "visited" || name === "visited_count") && args.length === 1) {
+            const nodeName = asStringLiteral(args[0]);
+            if (nodeName !== undefined) {
+                const key = nodeVisitCountKey(nodeName);
+                if (name === "visited") {
+                    // count > 0
+                    this.pushNumber(0);
+                    this.pushString(key);
+                    this.invoke("getContext");
+                    this.invoke("gt");
+                } else {
+                    this.pushString(key);
+                    this.invoke("getContext");
+                }
+                return;
+            }
+        }
+
         // Push arguments in reverse so that the first argument is on top of the
         // stack, matching the "param1 = top" convention used by Tzo callables.
         for (let i = args.length - 1; i >= 0; i--) {
             this.compile(args[i]);
         }
-        this.invoke(`${YARN_FUNCTION_PREFIX}${ctx.FUNC_ID().text}`);
+        this.invoke(`${YARN_FUNCTION_PREFIX}${name}`);
     }
 
     private pushNumber(value: number): void {
@@ -195,4 +224,14 @@ function unquoteYarnString(text: string): string {
         inner = inner.substring(1, inner.length - 1);
     }
     return inner.replace(/\\(["\\])/g, "$1");
+}
+
+function asStringLiteral(ctx: ExpressionContext): string | undefined {
+    if (ctx instanceof ExpValueContext) {
+        const value = ctx.value();
+        if (value instanceof ValueStringContext) {
+            return unquoteYarnString(value.STRING().text);
+        }
+    }
+    return undefined;
 }

@@ -94,6 +94,32 @@ const vm = new VM({}, {
     "yarn.random": (stack: Stack) => {
         stack.push(Math.random());
     },
+    "yarn.bool": (stack: Stack) => {
+        const [a] = getStackParams("yarn.bool", ["string | number"], stack) as [string | number];
+        stack.push((typeof a === "number" ? a !== 0 : a === "true") ? 1 : 0);
+    },
+    "yarn.string": (stack: Stack) => {
+        const [a] = getStackParams("yarn.string", ["string | number"], stack) as [string | number];
+        stack.push(`${a}`);
+    },
+    "yarn.number": (stack: Stack) => {
+        const [a] = getStackParams("yarn.number", ["string | number"], stack) as [string | number];
+        stack.push(Number(a));
+    },
+    "yarn.stop": (stack: Stack, context, vm: VM) => {
+        vm.quit();
+    },
+    "yarn.visited": (stack: Stack, context) => {
+        const [name] = getStackParams("yarn.visited", ["string"], stack) as [string];
+        const key = `$Yarn.Internal.NodeVisitCount.${name}`;
+        const count = typeof context[key] === "number" ? (context[key] as number) : 0;
+        stack.push(count > 0 ? 1 : 0);
+    },
+    "yarn.visited_count": (stack: Stack, context) => {
+        const [name] = getStackParams("yarn.visited_count", ["string"], stack) as [string];
+        const key = `$Yarn.Internal.NodeVisitCount.${name}`;
+        stack.push(typeof context[key] === "number" ? (context[key] as number) : 0);
+    },
 });
 
 vm.loadVMState(result.vmState as any);

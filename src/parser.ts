@@ -6,7 +6,7 @@ import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
 import u from "unist-builder";
 import { InvokeFunctionInstruction, PushNumberInstruction, PushStringInstruction, TzoVMState } from "tzo";
 import { Tokenizer, pushString, pushNumber, invokeFunction } from "tzo";
-import { ExpressionCompiler, YARN_FUNCTION_PREFIX } from "./expression";
+import { ExpressionCompiler, YARN_FUNCTION_PREFIX, nodeVisitCountKey } from "./expression";
 
 const TZO_cleanstack = `stacksize jgz { pop } stacksize jgz { 9 ppc - goto }`;
 const TZO_QVM_get_response = `ppc 5 + getResponse goto`;
@@ -15,6 +15,8 @@ export class Listener implements YarnSpinnerParserListener {
     indentLevels: number[] = [];
     foundFirstNode = false;
     onceCounter = 0;
+    nodeTitles: string[] = [];
+    currentNodeTitle: string = undefined;
     expr: ExpressionCompiler;
 
     qvmState = u("questmarkVMState", {
@@ -189,9 +191,33 @@ export class Listener implements YarnSpinnerParserListener {
     }
 
     enterJumpToNodeName(ctx: JumpToNodeNameContext) {
+        // Leaving the current node counts as a visit to it.
+        if (this.currentNodeTitle !== undefined) {
+            this.emitNodeVisitIncrement(this.currentNodeTitle);
+        }
         this.qTzo(TZO_cleanstack);
         this.q(pushString(ctx.ID().text));
         this.q(invokeFunction("goto"));
+    }
+
+    emitNodeVisitIncrement(nodeName: string) {
+        const key = nodeVisitCountKey(nodeName);
+        this.q(pushString(key));
+        this.q(invokeFunction("getContext"));
+        this.q(pushNumber(1));
+        this.q(invokeFunction("+"));
+        this.q(pushString(key));
+        this.q(invokeFunction("setContext"));
+    }
+
+    emitNodeVisitInits() {
+        const inits: Array<PushNumberInstruction | PushStringInstruction | InvokeFunctionInstruction> = [];
+        this.nodeTitles.forEach(title => {
+            inits.push(pushNumber(0));
+            inits.push(pushString(nodeVisitCountKey(title)));
+            inits.push(invokeFunction("setContext"));
+        });
+        this.qvmState.programList.unshift(...inits);
     }
 
     enterJumpToExpression(ctx: JumpToExpressionContext) {
@@ -266,11 +292,19 @@ export class Listener implements YarnSpinnerParserListener {
 
     exitNode(ctx: NodeContext) {
         // we have to wrap guards around nodes to prevent running into other nodes...
+        if (this.currentNodeTitle !== undefined) {
+            this.emitNodeVisitIncrement(this.currentNodeTitle);
+        }
         this.q(invokeFunction("}"));
+        this.currentNodeTitle = undefined;
     }
 
     enterTitle_header(ctx: Title_headerContext) {
         let id = ctx.ID().text;
+        this.currentNodeTitle = id;
+        if (!this.nodeTitles.includes(id)) {
+            this.nodeTitles.push(id);
+        }
         let z = invokeFunction("nop");
         z.label = id;
         this.q(z);
@@ -367,6 +401,7 @@ export class Listener implements YarnSpinnerParserListener {
     }
 
     getQVMState() {
+        this.emitNodeVisitInits();
         return this.qvmState;
     }
 }
