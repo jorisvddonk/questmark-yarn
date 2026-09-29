@@ -1,11 +1,12 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
-import { Command_formatted_textContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, JumpToNodeNameContext, JumpToExpressionContext, DetourToNodeNameContext, DetourToExpressionContext, Return_statementContext, Once_statementContext, Once_primary_clauseContext, Once_alternate_clauseContext, Title_headerContext, Line_group_itemContext, Line_group_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
+import { Command_formatted_textContext, ExpressionContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, JumpToNodeNameContext, JumpToExpressionContext, DetourToNodeNameContext, DetourToExpressionContext, Return_statementContext, Once_statementContext, Once_primary_clauseContext, Once_alternate_clauseContext, Title_headerContext, Line_group_itemContext, Line_group_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
 import { ANTLRErrorListener, ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
 import u from "unist-builder";
 import { InvokeFunctionInstruction, PushNumberInstruction, PushStringInstruction, TzoVMState } from "tzo";
 import { Tokenizer, pushString, pushNumber, invokeFunction } from "tzo";
+import { ExpressionCompiler } from "./expression";
 
 const TZO_cleanstack = `stacksize jgz { pop } stacksize jgz { 9 ppc - goto }`;
 const TZO_QVM_get_response = `ppc 5 + getResponse goto`;
@@ -14,6 +15,7 @@ export class Listener implements YarnSpinnerParserListener {
     indentLevels: number[] = [];
     foundFirstNode = false;
     onceCounter = 0;
+    expr: ExpressionCompiler;
 
     qvmState = u("questmarkVMState", {
         stack: [],
@@ -28,6 +30,7 @@ export class Listener implements YarnSpinnerParserListener {
 
     constructor(tokenStream: CommonTokenStream) {
         this.tokenStream = tokenStream;
+        this.expr = new ExpressionCompiler(i => this.q(i));
     }
 
     q(a: InvokeFunctionInstruction | PushStringInstruction | PushNumberInstruction) {
@@ -45,19 +48,16 @@ export class Listener implements YarnSpinnerParserListener {
     enterLine_formatted_text (ctx: Line_formatted_textContext) {
         let text = ctx.TEXT().join("");
         let rconcats = -1;
-        let in_expr = false;
         ctx.children.forEach(c => {
-            let z = (c as any)?._symbol?.type;
-            if (z === YarnSpinnerLexer.TEXT) {
-                this.q(pushString(this.tokenStream.getTokens()[(c as any)._symbol.index].text));
+            if (c instanceof ExpressionContext) {
+                this.expr.compile(c);
                 rconcats += 1;
-            } else if (z === YarnSpinnerLexer.EXPRESSION_START) {
-                in_expr = true;
-            } else if (z === YarnSpinnerLexer.EXPRESSION_END) {
-                in_expr = false;
-            } else if (in_expr) {
-                this.qTzo(c.text.replaceAll(/\$(\S+)/g, (a, b) => `"${b}" getContext`));
-                rconcats += 1; // TODO: determine if this should be bigger for complex expressions?
+            } else {
+                let z = (c as any)?._symbol?.type;
+                if (z === YarnSpinnerLexer.TEXT) {
+                    this.q(pushString((c as any)._symbol.text));
+                    rconcats += 1;
+                }
             }
         });
         while (rconcats > 0) {
@@ -237,43 +237,30 @@ export class Listener implements YarnSpinnerParserListener {
         // Non-title headers (for example 'tags') carry no QuestVM behaviour.
     }
 
-    enterValueNumber(ctx: ValueNumberContext) {
-        this.q(pushNumber(Number.parseInt(ctx.NUMBER().text)));
-    }
-
-    enterValueString (ctx: ValueStringContext) {
-        let t = ctx.STRING().text
-        this.q(pushString(t.substring(1, t.length-1)));
-    }
-
-    enterValueTrue(ctx: ValueTrueContext) {
-        this.q(pushNumber(1));
-    }
-
-    enterValueFalse(ctx: ValueFalseContext) {
-        this.q(pushNumber(0));
-    }
-    
-    enterVariable (ctx: VariableContext) {
-        let node = ctx._parent;
-        while(node && node.ruleIndex !== YarnSpinnerParser.RULE_line_statement) {
-            node = node._parent;
-        }
-        if (node && node.ruleIndex === YarnSpinnerParser.RULE_line_statement) {
-            // this variable is part of a line statement, so emit its value!
-            // no longer needed - already done as part of lineStatement earlier!
-            /*
-            this.q(pushString(ctx.VAR_ID().text.substring(1)));
-            this.q(invokeFunction("getContext"));
-            this.q(invokeFunction("emit")); // TODO: change to rconcat instead?
-            */
-        }
-    }
-
     exitSet_statement(ctx: Set_statementContext) {
-        let varName = ctx.variable().VAR_ID().text;
-        // value was captured earlier via Value.
-        this.q(pushString(varName.substring(1)));
+        let varName = ctx.variable().VAR_ID().text.substring(1);
+        let op = (ctx as any)._op?.text;
+        // Compile the right-hand side; its value is left on the stack.
+        this.expr.compile(ctx.expression());
+        if (op === undefined || op === "=" || op === "to") {
+            this.q(pushString(varName));
+            this.q(invokeFunction("setContext"));
+            return;
+        }
+        // Compound assignment: current value <op> rhs, then store the result.
+        this.q(pushString(varName));
+        this.q(invokeFunction("getContext"));
+        const opFunctions: { [key: string]: string } = {
+            "+=": "+", "-=": "-", "*=": "*", "/=": "/", "%=": "%",
+        };
+        const opFn = opFunctions[op];
+        if (opFn === undefined) {
+            console.warn(`UNIMPLEMENTED: set operator '${op}'`);
+            this.q(invokeFunction("setContext"));
+            return;
+        }
+        this.q(invokeFunction(opFn));
+        this.q(pushString(varName));
         this.q(invokeFunction("setContext"));
     }
 
@@ -291,39 +278,10 @@ export class Listener implements YarnSpinnerParserListener {
     }
 
     handleIfElse(ifStatement?: If_clauseContext, elseStatement?: Else_clauseContext) {
-        let variable = ifStatement.expression().children[0]?.text;
-        let comparison = ifStatement.expression().children[1]?.text;
-        let comparator = ifStatement.expression().children[2]?.text;
-
-        let v = variable.replaceAll(/\$(\S+)/g, (a, b) => `"${b}" getContext`);
-
-        if (comparison !== undefined && comparator !== undefined) {
-            this.qTzo(comparator);
-            
-            if (variable.startsWith("$")) {
-                this.qTzo(v);
-            } else {
-                console.warn("UNIMPLEMENTED: if statement variable is a complex expression!");
-            }
-            
-            if (comparison == "<") {
-                this.q(invokeFunction("lt"));
-            } else if (comparison == ">") {
-                this.q(invokeFunction("gt"));
-            } else if (comparison == "=") {
-                this.q(invokeFunction("eq"));
-            } else if (comparison == "==") {
-                this.q(invokeFunction("eq"));
-            } else {
-                console.warn("UNIMPLEMENTED comparison:", comparison);
-            }
-        } else {
-            // boolean comparison; check if the value is greater than 0 (truthy)!
-            this.q(pushNumber(0)) // comparator
-            this.qTzo(v); // variable
-            this.q(invokeFunction("gt"));
+        if (ifStatement === undefined) {
+            return;
         }
-
+        this.expr.compile(ifStatement.expression());
         if (elseStatement !== undefined) {
             this.q(invokeFunction("dup"));
         }

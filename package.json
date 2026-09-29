@@ -15,6 +15,7 @@
     "build": "npx cross-env rm -rf dist/ && tsc -p tsconfig.json && npm run wp_build",
     "test": "ts-node src/test.ts",
     "start": "ts-node src/cli.ts",
+    "devrun": "ts-node src/devrun.ts",
     "wp_build": "webpack build --config webpack.config.js",
     "fix_antlr_grammar_ts": "ts-node src/util/fix_antlr_grammar_ts.ts",
     "antlr4ts-yarnspinnerlexer": "antlr4ts -visitor -Xexact-output-dir -o src/grammars src/grammars/YarnSpinnerLexer.g4",
