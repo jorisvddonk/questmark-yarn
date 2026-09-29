@@ -1,5 +1,5 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
-import { Command_formatted_textContext, Declare_statementContext, Enum_case_statementContext, Enum_statementContext, ExpAddSubContext, ExpAndOrXorContext, ExpComparisonContext, ExpEqualityContext, ExpMultDivModContext, ExpNegativeContext, ExpNotContext, ExpParensContext, ExpValueContext, ExpressionContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, JumpToNodeNameContext, JumpToExpressionContext, DetourToNodeNameContext, DetourToExpressionContext, Return_statementContext, Once_statementContext, Once_primary_clauseContext, Once_alternate_clauseContext, Title_headerContext, When_headerContext, Line_group_itemContext, Line_group_statementContext, Line_formatted_textContext, Line_statementContext, LineConditionContext, LineOnceConditionContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, ValueTypeMemberReferenceContext, ValueVarContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
+import { Command_formatted_textContext, Declare_statementContext, Enum_case_statementContext, Enum_statementContext, ExpAddSubContext, ExpAndOrXorContext, ExpComparisonContext, ExpEqualityContext, ExpMultDivModContext, ExpNegativeContext, ExpNotContext, ExpParensContext, ExpValueContext, ExpressionContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, JumpToNodeNameContext, JumpToExpressionContext, DetourToNodeNameContext, DetourToExpressionContext, Return_statementContext, Once_statementContext, Once_primary_clauseContext, Once_alternate_clauseContext, Title_headerContext, When_headerContext, Line_group_itemContext, Line_group_statementContext, Line_formatted_textContext, Line_statementContext, LineConditionContext, LineOnceConditionContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueFuncContext, ValueNumberContext, ValueTrueContext, ValueTypeMemberReferenceContext, ValueVarContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
 import { ANTLRErrorListener, ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
@@ -39,6 +39,8 @@ type NodeRecord = {
     title?: string;
     label: string;
     when: WhenClause[];
+    subtitle?: string;
+    tracking?: "never" | "always";
 };
 
 export class Listener implements YarnSpinnerParserListener {
@@ -62,6 +64,13 @@ export class Listener implements YarnSpinnerParserListener {
     saliency: SaliencyCompiler;
     lineGroupCounter = 0;
     generatedLineIDCounter = 0;
+    detourCounter = 0;
+    detourDepthKey = "$Yarn.Internal.Detour.Depth";
+    detourReturnPrefix = "$Yarn.Internal.Detour.Return.";
+    detourNodePrefix = "$Yarn.Internal.Detour.Node.";
+    hasAnyContentCounter = 0;
+    hasAnyContentCalls: Array<{ name: string, retKey: string, id: number }> = [];
+    boolStringCounter = 0;
     lineGroupStack: LineGroupFrame[] = [];
     contentIDs: string[] = [];
     lineOnceKeys: string[] = [];
@@ -91,7 +100,13 @@ export class Listener implements YarnSpinnerParserListener {
         if (saliencyStrategy !== undefined) {
             this.saliencyStrategy = saliencyStrategy;
         }
-        this.expr = new ExpressionCompiler(i => this.q(i), this, (name) => this.referencedVars.add(name), (name) => this.variableTypes[name]);
+        this.expr = new ExpressionCompiler(
+            i => this.q(i),
+            this,
+            (name) => this.referencedVars.add(name),
+            (name) => this.variableTypes[name],
+            (groupName) => this.emitHasAnyContentCall(groupName),
+        );
         this.saliency = new SaliencyCompiler(i => this.q(i), this.expr, this.saliencyStrategy);
     }
 
@@ -162,6 +177,9 @@ export class Listener implements YarnSpinnerParserListener {
         ctx.children.forEach(c => {
             if (c instanceof ExpressionContext) {
                 this.expr.compile(c);
+                if (this.valueTypeOfExpression(c) === "bool") {
+                    this.emitBoolToString();
+                }
                 rconcats += 1;
             } else {
                 let z = (c as any)?._symbol?.type;
@@ -176,6 +194,23 @@ export class Listener implements YarnSpinnerParserListener {
             this.q(invokeFunction("rconcat"));
         }
         //console.log("---", text);
+    }
+
+    // Converts a 0/1 boolean on the stack to the Yarn string "True"/"False".
+    emitBoolToString(): void {
+        const id = this.boolStringCounter;
+        this.boolStringCounter += 1;
+        const endLabel = `_boolstr_${id}`;
+        this.q(invokeFunction("jgz"));
+        this.q(invokeFunction("{"));
+        this.q(pushString("True"));
+        this.q(pushString(endLabel));
+        this.q(invokeFunction("goto"));
+        this.q(invokeFunction("}"));
+        this.q(pushString("False"));
+        const endInstruction = invokeFunction("nop");
+        endInstruction.label = endLabel;
+        this.q(endInstruction);
     }
 
     exitLine_statement(context: Line_statementContext) {
@@ -411,10 +446,10 @@ export class Listener implements YarnSpinnerParserListener {
     }
 
     enterJumpToNodeName(ctx: JumpToNodeNameContext) {
-        // Leaving the current node counts as a visit to it.
-        if (this.currentNodeTitle !== undefined) {
-            this.emitNodeVisitIncrement(this.currentNodeTitle);
-        }
+        // Jumping unwinds the detour stack: every suspended node is left, and
+        // then so is the current node.
+        this.emitUnwindDetourStack();
+        this.emitCurrentNodeVisit();
         this.qTzo(TZO_cleanstack);
         this.q(pushString(ctx.ID().text));
         this.q(invokeFunction("goto"));
@@ -437,9 +472,16 @@ export class Listener implements YarnSpinnerParserListener {
             inits.push(pushString(contentViewCountKey(id)));
             inits.push(invokeFunction("setContext"));
         });
-        this.nodeTitles.forEach(title => {
+        const visitNames = new Set<string>();
+        this.nodeTitles.forEach(title => visitNames.add(title));
+        this.nodes.forEach(node => {
+            if (node.title !== undefined) {
+                visitNames.add(visitNameOf(node));
+            }
+        });
+        visitNames.forEach(name => {
             inits.push(pushNumber(0));
-            inits.push(pushString(nodeVisitCountKey(title)));
+            inits.push(pushString(nodeVisitCountKey(name)));
             inits.push(invokeFunction("setContext"));
         });
         this.nodes.forEach(node => {
@@ -454,6 +496,9 @@ export class Listener implements YarnSpinnerParserListener {
             inits.push(pushString(key));
             inits.push(invokeFunction("setContext"));
         });
+        inits.push(pushNumber(0));
+        inits.push(pushString(this.detourDepthKey));
+        inits.push(invokeFunction("setContext"));
         // Implicitly-declared variables: referenced but never declared/assigned.
         this.referencedVars.forEach(name => {
             if (this.declaredVars.has(name)) {
@@ -481,15 +526,177 @@ export class Listener implements YarnSpinnerParserListener {
     // --- Yarn Spinner 3 features ---
 
     enterDetourToNodeName(ctx: DetourToNodeNameContext) {
-        console.warn("UNIMPLEMENTED: <<detour>> is not supported; content will fall through");
+        const label = `_detour_${this.detourCounter}`;
+        this.detourCounter += 1;
+        this.emitDetourPush(this.currentNodeTitle, label);
+        this.qTzo(TZO_cleanstack);
+        this.q(pushString(ctx.ID().text));
+        this.q(invokeFunction("goto"));
+        const returnInstruction = invokeFunction("nop");
+        returnInstruction.label = label;
+        this.q(returnInstruction);
     }
 
     enterDetourToExpression(ctx: DetourToExpressionContext) {
-        console.warn("UNIMPLEMENTED: <<detour>> is not supported; content will fall through");
+        const label = `_detour_${this.detourCounter}`;
+        this.detourCounter += 1;
+        const targetKey = `_detour_target_${this.detourCounter}`;
+        // Evaluate the target first, stash it, then do the stack bookkeeping.
+        this.expr.compile(ctx.expression());
+        this.q(pushString(targetKey));
+        this.q(invokeFunction("setContext"));
+
+        this.emitDetourPush(this.currentNodeTitle, label);
+        this.qTzo(TZO_cleanstack);
+        this.q(pushString(targetKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("goto"));
+        const returnInstruction = invokeFunction("nop");
+        returnInstruction.label = label;
+        this.q(returnInstruction);
+    }
+
+    // Pushes a detour frame: the node being suspended and the label to resume at.
+    emitDetourPush(nodeName: string, returnLabel: string): void {
+        // return.<depth> = returnLabel
+        this.q(pushString(returnLabel));
+        this.q(pushString(this.detourReturnPrefix));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("rconcat"));
+        this.q(invokeFunction("setContext"));
+        // node.<depth> = nodeName
+        this.q(pushString(nodeName ?? ""));
+        this.q(pushString(this.detourNodePrefix));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("rconcat"));
+        this.q(invokeFunction("setContext"));
+        // depth = depth + 1
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(pushNumber(1));
+        this.q(invokeFunction("+"));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("setContext"));
+    }
+
+    // If we are inside a detour, return to the caller (without incrementing any
+    // visit count; callers handle that themselves).
+    emitDetourReturnIfActive(): void {
+        // depth > 0 ?  (gt expects the left operand on top)
+        this.q(pushNumber(0));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("gt"));
+        // if depth > 0, skip the guard block and run the return sequence
+        this.q(invokeFunction("jgz"));
+        this.q(invokeFunction("{"));
+        // depth = depth - 1
+        this.q(pushNumber(1));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("-"));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("setContext"));
+        // label = getContext(returnPrefix + depth)
+        this.q(pushString(this.detourReturnPrefix));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("rconcat"));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("goto"));
+        this.q(invokeFunction("}"));
     }
 
     enterReturn_statement(ctx: Return_statementContext) {
-        console.warn("UNIMPLEMENTED: <<return>> is not supported");
+        // Returning completes the current node.
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(pushNumber(0));
+        this.q(invokeFunction("eq"));
+        // depth == 0: behave like <<stop>>
+        this.q(invokeFunction("jgz"));
+        this.q(invokeFunction("{"));
+        this.q(invokeFunction("exit"));
+        this.q(invokeFunction("}"));
+        if (this.currentNodeTitle !== undefined) {
+            this.emitCurrentNodeVisit();
+        }
+        // depth = depth - 1
+        this.q(pushNumber(1));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("-"));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("setContext"));
+        // label = getContext(returnPrefix + depth)
+        this.q(pushString(this.detourReturnPrefix));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("rconcat"));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("goto"));
+    }
+
+    // Increments the visit count of every node on the detour stack (they are
+    // all being left by a jump) and clears the stack.
+    emitUnwindDetourStack(): void {
+        const id = this.detourCounter;
+        this.detourCounter += 1;
+        const checkLabel = `_unwind_check_${id}`;
+        const endLabel = `_unwind_end_${id}`;
+        const vkeyTemp = `_unwind_vkey_${id}`;
+
+        const checkInstruction = invokeFunction("nop");
+        checkInstruction.label = checkLabel;
+        this.q(checkInstruction);
+        // depth > 0 ?  (gt expects the left operand on top)
+        this.q(pushNumber(0));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("gt"));
+        this.q(invokeFunction("jz"));
+        this.q(invokeFunction("{"));
+        this.q(pushString(endLabel));
+        this.q(invokeFunction("goto"));
+        this.q(invokeFunction("}"));
+        // depth -= 1
+        this.q(pushNumber(1));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("-"));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("setContext"));
+        // vkey = nodeVisitPrefix + nodePrefix + depth
+        this.q(pushString("$Yarn.Internal.NodeVisitCount."));
+        this.q(pushString(this.detourNodePrefix));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("rconcat"));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("rconcat"));
+        this.q(pushString(vkeyTemp));
+        this.q(invokeFunction("setContext"));
+        // count = getContext(vkey) + 1; setContext(vkey, count)
+        this.q(pushString(vkeyTemp));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("getContext"));
+        this.q(pushNumber(1));
+        this.q(invokeFunction("+"));
+        this.q(pushString(vkeyTemp));
+        this.q(invokeFunction("getContext"));
+        this.q(invokeFunction("setContext"));
+        // loop
+        this.q(pushString(checkLabel));
+        this.q(invokeFunction("goto"));
+        const endInstruction = invokeFunction("nop");
+        endInstruction.label = endLabel;
+        this.q(endInstruction);
+        // stack cleared
+        this.q(pushNumber(0));
+        this.q(pushString(this.detourDepthKey));
+        this.q(invokeFunction("setContext"));
     }
 
     enterOnce_statement(ctx: Once_statementContext) {
@@ -549,10 +756,12 @@ export class Listener implements YarnSpinnerParserListener {
         if (record !== undefined && record.title !== undefined) {
             this.nodes.push(record);
         }
-        // we have to wrap guards around nodes to prevent running into other nodes...
-        if (this.currentNodeTitle !== undefined) {
-            this.emitNodeVisitIncrement(this.currentNodeTitle);
+        // Leaving the node counts as a visit to it (unless tracking is disabled).
+        if (record !== undefined && record.title !== undefined && record.tracking !== "never") {
+            this.emitNodeVisitIncrement(visitNameOf(record));
         }
+        // If we are a detoured node finishing normally, return to the caller.
+        this.emitDetourReturnIfActive();
         this.q(invokeFunction("}"));
         this.currentNodeTitle = undefined;
     }
@@ -600,7 +809,39 @@ export class Listener implements YarnSpinnerParserListener {
     }
 
     enterHeader(ctx: HeaderContext) {
-        // Non-title headers (for example 'tags') carry no QuestVM behaviour.
+        const record = this.nodeStack[this.nodeStack.length - 1];
+        if (record === undefined) {
+            return;
+        }
+        const key = ctx._header_key?.text?.toLowerCase();
+        const value = ctx._header_value?.text;
+        if (key === "subtitle") {
+            record.subtitle = value;
+        } else if (key === "tracking") {
+            if (value === "never" || value === "always") {
+                record.tracking = value;
+            }
+        }
+    }
+
+    currentNodeVisitName(): string | undefined {
+        const record = this.nodeStack[this.nodeStack.length - 1];
+        if (record === undefined || record.title === undefined) {
+            return this.currentNodeTitle;
+        }
+        return visitNameOf(record);
+    }
+
+    emitCurrentNodeVisit(): void {
+        const record = this.nodeStack[this.nodeStack.length - 1];
+        const name = this.currentNodeVisitName();
+        if (name === undefined) {
+            return;
+        }
+        if (record !== undefined && record.tracking === "never") {
+            return;
+        }
+        this.emitNodeVisitIncrement(name);
     }
 
     enterEnum_statement(ctx: Enum_statementContext) {
@@ -722,6 +963,9 @@ export class Listener implements YarnSpinnerParserListener {
                     return typeof resolved.value === "string" ? "string" : "number";
                 }
             }
+            if (value instanceof ValueFuncContext) {
+                return FUNCTION_RETURN_TYPES[value.function_call().FUNC_ID().text];
+            }
         }
         return undefined;
     }
@@ -759,7 +1003,9 @@ export class Listener implements YarnSpinnerParserListener {
 
     exitSet_statement(ctx: Set_statementContext) {
         let varName = ctx.variable().VAR_ID().text.substring(1);
-        this.declaredVars.add(varName);
+        // Note: `set` does not count as an explicit declaration, so that
+        // variables either assigned or read before assignment still get a
+        // guarded default at startup.
         let op = (ctx as any)._op?.text;
         const hint = this.variableEnums[varName];
         // Compile the right-hand side; its value is left on the stack.
@@ -860,8 +1106,24 @@ export class Listener implements YarnSpinnerParserListener {
         }
     }
 
+    emitHasAnyContentCall(groupName: string): void {
+        const id = this.hasAnyContentCounter;
+        this.hasAnyContentCounter += 1;
+        const retKey = `_hac_ret_${id}`;
+        const returnLabel = `_hac_return_${id}`;
+        this.q(pushString(returnLabel));
+        this.q(pushString(retKey));
+        this.q(invokeFunction("setContext"));
+        this.q(pushString(`_hac_${id}`));
+        this.q(invokeFunction("goto"));
+        const returnInstruction = invokeFunction("nop");
+        returnInstruction.label = returnLabel;
+        this.q(returnInstruction);
+        this.hasAnyContentCalls.push({ name: groupName, retKey, id });
+    }
+
     emitNodeDispatch() {
-        if (this.nodes.length === 0) {
+        if (this.nodes.length === 0 && this.hasAnyContentCalls.length === 0) {
             return;
         }
         // The dispatch table lives at the end of the program, wrapped in a
@@ -906,6 +1168,30 @@ export class Listener implements YarnSpinnerParserListener {
                 // No eligible content: stop the dialogue.
                 this.q(invokeFunction("exit"));
             }
+        }
+        // has_any_content("<group>") subroutines. Each leaves 1/0 on the stack and
+        // jumps back to its caller.
+        for (const call of this.hasAnyContentCalls) {
+            const subInstruction = invokeFunction("nop");
+            subInstruction.label = `_hac_${call.id}`;
+            this.q(subInstruction);
+            const members = this.nodes.filter(n => n.title === call.name);
+            if (members.length === 0) {
+                this.q(pushNumber(0));
+            } else if (!members.some(m => m.when.length > 0)) {
+                // Not a node group: it always has content.
+                this.q(pushNumber(1));
+            } else {
+                members.forEach((member, index) => {
+                    this.emitNodeWhenConditions(member);
+                    if (index > 0) {
+                        this.q(invokeFunction("or"));
+                    }
+                });
+            }
+            this.q(pushString(call.retKey));
+            this.q(invokeFunction("getContext"));
+            this.q(invokeFunction("goto"));
         }
         this.q(invokeFunction("}"));
     }
@@ -998,6 +1284,30 @@ export function parse(input: string, errorListener?: ANTLRErrorListener<any>, op
         tokens: tokenStream.getTokens()
     }
 }
+
+function visitNameOf(record: NodeRecord): string {
+    return record.subtitle !== undefined ? `${record.title}.${record.subtitle}` : record.title;
+}
+
+const FUNCTION_RETURN_TYPES: { [name: string]: string } = {
+    visited: "bool",
+    visited_count: "number",
+    has_any_content: "bool",
+    bool: "bool",
+    string: "string",
+    number: "number",
+    min: "number",
+    max: "number",
+    round: "number",
+    floor: "number",
+    ceil: "number",
+    inc: "number",
+    dec: "number",
+    random: "number",
+    dice: "number",
+    decimal: "string",
+    format: "string",
+};
 
 function countBooleanOperators(ctx: ExpressionContext): number {
     if (ctx === undefined || ctx === null) {

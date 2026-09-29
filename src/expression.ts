@@ -97,6 +97,7 @@ export class ExpressionCompiler {
         private enumResolver?: EnumResolver,
         private variableTracker?: (name: string) => void,
         private variableTypeResolver?: (name: string) => string | undefined,
+        private hasAnyContentHook?: (groupName: string) => void,
     ) { }
 
     compile(ctx: ExpressionContext, options?: CompileOptions): void {
@@ -267,6 +268,17 @@ export class ExpressionCompiler {
                     this.pushString(key);
                     this.invoke("getContext");
                 }
+                return;
+            }
+        }
+
+        // `has_any_content("<group>")` with a literal group name is compiled to a
+        // generated subroutine (emitted once all nodes are known) that ORs the
+        // group members' conditions together.
+        if (name === "has_any_content" && args.length === 1 && this.hasAnyContentHook !== undefined) {
+            const groupName = asStringLiteral(args[0]);
+            if (groupName !== undefined) {
+                this.hasAnyContentHook(groupName);
                 return;
             }
         }
