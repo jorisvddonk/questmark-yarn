@@ -1,12 +1,12 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
-import { Command_formatted_textContext, ExpressionContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, JumpToNodeNameContext, JumpToExpressionContext, DetourToNodeNameContext, DetourToExpressionContext, Return_statementContext, Once_statementContext, Once_primary_clauseContext, Once_alternate_clauseContext, Title_headerContext, Line_group_itemContext, Line_group_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
+import { Command_formatted_textContext, Declare_statementContext, ExpressionContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, JumpToNodeNameContext, JumpToExpressionContext, DetourToNodeNameContext, DetourToExpressionContext, Return_statementContext, Once_statementContext, Once_primary_clauseContext, Once_alternate_clauseContext, Title_headerContext, Line_group_itemContext, Line_group_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
 import { ANTLRErrorListener, ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
 import u from "unist-builder";
 import { InvokeFunctionInstruction, PushNumberInstruction, PushStringInstruction, TzoVMState } from "tzo";
 import { Tokenizer, pushString, pushNumber, invokeFunction } from "tzo";
-import { ExpressionCompiler } from "./expression";
+import { ExpressionCompiler, YARN_FUNCTION_PREFIX } from "./expression";
 
 const TZO_cleanstack = `stacksize jgz { pop } stacksize jgz { 9 ppc - goto }`;
 const TZO_QVM_get_response = `ppc 5 + getResponse goto`;
@@ -137,13 +137,55 @@ export class Listener implements YarnSpinnerParserListener {
     }
 
     enterCommand_formatted_text(ctx: Command_formatted_textContext) {
-        //q(invokeFunction(ctx.COMMAND_TEXT().join("")));
-        let text = ctx.COMMAND_TEXT().join("");
-        if (text.startsWith("$")) {
-            this.qTzo(text.substring(1));
-        } else if (text.trim() == "RESPONSE") {
-            this.qTzo(TZO_QVM_get_response);
+        const joined = ctx.COMMAND_TEXT().join("");
+        if (joined.startsWith("$")) {
+            // Raw Tzo bytecode escape hatch: <<$ ... >>
+            this.qTzo(joined.substring(1));
+            return;
         }
+        if (joined.trim() == "RESPONSE") {
+            this.qTzo(TZO_QVM_get_response);
+            return;
+        }
+
+        // Arbitrary command: dispatch to a host function named after the first
+        // whitespace-delimited word, with the remaining words and any inline
+        // expressions as arguments.
+        const args: Array<string | ExpressionContext> = [];
+        let buffer = "";
+        ctx.children.forEach(c => {
+            if (c instanceof ExpressionContext) {
+                if (buffer.length > 0) {
+                    buffer.split(/\s+/).filter(w => w.length > 0).forEach(w => args.push(w));
+                    buffer = "";
+                }
+                args.push(c);
+            } else {
+                const sym = (c as any)?._symbol;
+                if (sym && sym.type === YarnSpinnerLexer.COMMAND_TEXT) {
+                    buffer += sym.text;
+                }
+            }
+        });
+        if (buffer.length > 0) {
+            buffer.split(/\s+/).filter(w => w.length > 0).forEach(w => args.push(w));
+        }
+
+        if (args.length === 0 || typeof args[0] !== "string") {
+            console.warn(`UNIMPLEMENTED: command with non-literal name: ${joined}`);
+            return;
+        }
+        const commandName = args.shift() as string;
+        // Push args in reverse so the first argument ends up on top.
+        for (let i = args.length - 1; i >= 0; i--) {
+            const arg = args[i];
+            if (typeof arg === "string") {
+                this.q(pushString(arg));
+            } else {
+                this.expr.compile(arg);
+            }
+        }
+        this.q(invokeFunction(`${YARN_FUNCTION_PREFIX}${commandName}`));
     }
 
     enterJumpToNodeName(ctx: JumpToNodeNameContext) {
@@ -153,7 +195,9 @@ export class Listener implements YarnSpinnerParserListener {
     }
 
     enterJumpToExpression(ctx: JumpToExpressionContext) {
-        console.warn("UNIMPLEMENTED: jump to expression");
+        this.qTzo(TZO_cleanstack);
+        this.expr.compile(ctx.expression());
+        this.q(invokeFunction("goto"));
     }
 
     // --- Yarn Spinner 3 features ---
@@ -172,25 +216,30 @@ export class Listener implements YarnSpinnerParserListener {
 
     enterOnce_statement(ctx: Once_statementContext) {
         this.onceCounter += 1;
-        // condition: this once site has not been seen yet
+        // condition: this site has not been seen yet
         this.q(pushString(this.onceLabel()));
         this.q(invokeFunction("hasContext"));
         this.q(invokeFunction("not"));
+        // ... optionally AND'd with the clause's own condition (<<once if ...>>)
+        const condition = ctx.once_primary_clause()?.expression();
+        if (condition !== undefined) {
+            this.expr.compile(condition);
+            this.q(invokeFunction("and"));
+        }
         if (ctx.once_alternate_clause() !== undefined) {
             this.q(invokeFunction("dup"));
         }
         this.q(invokeFunction("jgz"));
         this.q(invokeFunction("{"));
-    }
-
-    enterOnce_primary_clause(ctx: Once_primary_clauseContext) {
-        if (ctx.expression() !== undefined) {
-            console.warn("UNIMPLEMENTED: <<once if <expression>>> conditions are ignored");
-        }
-        // mark this once site as having been seen
+        // Code between here and the matching '}' only runs when the branch is
+        // taken, so mark the site as seen here.
         this.q(pushNumber(1));
         this.q(pushString(this.onceLabel()));
         this.q(invokeFunction("setContext"));
+    }
+
+    enterOnce_primary_clause(ctx: Once_primary_clauseContext) {
+        // Condition and mark-seen are handled by enterOnce_statement.
     }
 
     exitOnce_primary_clause(ctx: Once_primary_clauseContext) {
@@ -235,6 +284,21 @@ export class Listener implements YarnSpinnerParserListener {
 
     enterHeader(ctx: HeaderContext) {
         // Non-title headers (for example 'tags') carry no QuestVM behaviour.
+    }
+
+    enterDeclare_statement(ctx: Declare_statementContext) {
+        // Emit a guarded default: only set the value if it isn't set already,
+        // so that host-provided / persisted values are not clobbered.
+        const name = ctx.variable().VAR_ID().text.substring(1);
+        this.q(pushString(name));
+        this.q(invokeFunction("hasContext"));
+        this.q(invokeFunction("not"));
+        this.q(invokeFunction("jgz"));
+        this.q(invokeFunction("{"));
+        this.expr.compile(ctx.expression());
+        this.q(pushString(name));
+        this.q(invokeFunction("setContext"));
+        this.q(invokeFunction("}"));
     }
 
     exitSet_statement(ctx: Set_statementContext) {

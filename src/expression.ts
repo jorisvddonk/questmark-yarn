@@ -24,6 +24,12 @@ import { invokeFunction, pushNumber, pushString } from "tzo";
 
 export type EmitInstruction = (i: PushNumberInstruction | PushStringInstruction | InvokeFunctionInstruction) => void;
 
+// Yarn-level functions and commands are emitted under this prefix so that they
+// cannot collide with Tzo standard opcodes (e.g. Yarn's `min` function vs Tzo's
+// `min` (= subtract) opcode). Hosts register their functions/commands under
+// `yarn.<name>`.
+export const YARN_FUNCTION_PREFIX = "yarn.";
+
 // Tzo's binary opcodes follow the convention "top-of-stack OP second-on-stack".
 // Yarn expressions are left-associative, so we push the right operand first and
 // the left operand second; the left operand then ends up on top.
@@ -167,7 +173,7 @@ export class ExpressionCompiler {
         for (let i = args.length - 1; i >= 0; i--) {
             this.compile(args[i]);
         }
-        this.invoke(ctx.FUNC_ID().text);
+        this.invoke(`${YARN_FUNCTION_PREFIX}${ctx.FUNC_ID().text}`);
     }
 
     private pushNumber(value: number): void {

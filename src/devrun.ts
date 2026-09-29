@@ -57,6 +57,43 @@ const vm = new VM({}, {
         const [a, b] = getStackParams("%", ["number", "number"], stack) as [number, number];
         stack.push(a % b);
     },
+    // A small set of Yarn built-in functions, for development only. Real hosts
+    // must provide these under the same "yarn." names.
+    "yarn.min": (stack: Stack) => {
+        const [a, b] = getStackParams("yarn.min", ["number", "number"], stack) as [number, number];
+        stack.push(Math.min(a, b));
+    },
+    "yarn.max": (stack: Stack) => {
+        const [a, b] = getStackParams("yarn.max", ["number", "number"], stack) as [number, number];
+        stack.push(Math.max(a, b));
+    },
+    "yarn.round": (stack: Stack) => {
+        const [a] = getStackParams("yarn.round", ["number"], stack) as [number];
+        stack.push(Math.round(a));
+    },
+    "yarn.floor": (stack: Stack) => {
+        const [a] = getStackParams("yarn.floor", ["number"], stack) as [number];
+        stack.push(Math.floor(a));
+    },
+    "yarn.ceil": (stack: Stack) => {
+        const [a] = getStackParams("yarn.ceil", ["number"], stack) as [number];
+        stack.push(Math.ceil(a));
+    },
+    "yarn.decimal": (stack: Stack) => {
+        const [a] = getStackParams("yarn.decimal", ["number"], stack) as [number];
+        stack.push(a.toFixed(2));
+    },
+    "yarn.inc": (stack: Stack) => {
+        const [a] = getStackParams("yarn.inc", ["number"], stack) as [number];
+        stack.push(a + 1);
+    },
+    "yarn.dec": (stack: Stack) => {
+        const [a] = getStackParams("yarn.dec", ["number"], stack) as [number];
+        stack.push(a - 1);
+    },
+    "yarn.random": (stack: Stack) => {
+        stack.push(Math.random());
+    },
 });
 
 vm.loadVMState(result.vmState as any);
