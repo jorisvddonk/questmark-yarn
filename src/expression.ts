@@ -36,6 +36,21 @@ export function nodeVisitCountKey(nodeName: string): string {
     return `$Yarn.Internal.NodeVisitCount.${nodeName}`;
 }
 
+export interface ResolvedEnumMember {
+    value: string | number;
+    enumName: string;
+}
+
+export interface EnumResolver {
+    resolveEnumMember(typeName: string | undefined, memberName: string, hint?: string): ResolvedEnumMember | undefined;
+}
+
+export interface CompileOptions {
+    // The enum a bare `.Member` reference should be resolved against, usually
+    // the declared type of the variable being assigned to.
+    enumHint?: string;
+}
+
 // Tzo's binary opcodes follow the convention "top-of-stack OP second-on-stack".
 // Yarn expressions are left-associative, so we push the right operand first and
 // the left operand second; the left operand then ends up on top.
@@ -73,66 +88,66 @@ const NEGATED_OPERATORS = new Set([">=", "<=", "!=", "neq", "xor", "^"]);
  * strings as Tzo strings.
  */
 export class ExpressionCompiler {
-    constructor(private emit: EmitInstruction) { }
+    constructor(private emit: EmitInstruction, private enumResolver?: EnumResolver) { }
 
-    compile(ctx: ExpressionContext): void {
+    compile(ctx: ExpressionContext, options?: CompileOptions): void {
         if (ctx instanceof ExpParensContext) {
-            this.compile(ctx.expression());
+            this.compile(ctx.expression(), options);
             return;
         }
         if (ctx instanceof ExpNegativeContext) {
             // unary minus: 0 - x
-            this.compile(ctx.expression());
+            this.compile(ctx.expression(), options);
             this.pushNumber(0);
             this.invoke("-");
             return;
         }
         if (ctx instanceof ExpNotContext) {
-            this.compile(ctx.expression());
+            this.compile(ctx.expression(), options);
             this.invoke("not");
             return;
         }
         if (ctx instanceof ExpMultDivModContext) {
-            this.binary(ctx.expression(0), ctx.expression(1), ctx._op.text);
+            this.binary(ctx.expression(0), ctx.expression(1), ctx._op.text, options);
             return;
         }
         if (ctx instanceof ExpAddSubContext) {
-            this.binary(ctx.expression(0), ctx.expression(1), ctx._op.text);
+            this.binary(ctx.expression(0), ctx.expression(1), ctx._op.text, options);
             return;
         }
         if (ctx instanceof ExpComparisonContext) {
-            this.binary(ctx.expression(0), ctx.expression(1), ctx._op.text);
+            this.binary(ctx.expression(0), ctx.expression(1), ctx._op.text, options);
             return;
         }
         if (ctx instanceof ExpEqualityContext) {
-            this.binary(ctx.expression(0), ctx.expression(1), ctx._op.text);
+            this.binary(ctx.expression(0), ctx.expression(1), ctx._op.text, options);
             return;
         }
         if (ctx instanceof ExpAndOrXorContext) {
-            this.binary(ctx.expression(0), ctx.expression(1), ctx._op.text);
+            this.binary(ctx.expression(0), ctx.expression(1), ctx._op.text, options);
             return;
         }
         if (ctx instanceof ExpValueContext) {
-            this.compileValue(ctx.value());
+            this.compileValue(ctx.value(), options);
             return;
         }
         throw new Error(`ExpressionCompiler: unsupported expression node ${ctx.constructor.name}: ${ctx.text}`);
     }
 
-    private binary(left: ExpressionContext, right: ExpressionContext, op: string): void {
+    private binary(left: ExpressionContext, right: ExpressionContext, op: string, options?: CompileOptions): void {
         const base = OPERATOR_MAP[op];
         if (base === undefined) {
             throw new Error(`ExpressionCompiler: unsupported operator '${op}'`);
         }
-        this.compile(right);
-        this.compile(left);
+        this.compile(right, options);
+        this.compile(left, options);
         this.invoke(base);
         if (NEGATED_OPERATORS.has(op)) {
             this.invoke("not");
         }
     }
 
-    private compileValue(ctx: ValueContext): void {
+    private compileValue(ctx: ValueContext, options?: CompileOptions): void {
         if (ctx instanceof ValueNumberContext) {
             this.pushNumber(parseFloat(ctx.NUMBER().text));
             return;
@@ -154,12 +169,25 @@ export class ExpressionCompiler {
             return;
         }
         if (ctx instanceof ValueFuncContext) {
-            this.compileFunctionCall(ctx.function_call());
+            this.compileFunctionCall(ctx.function_call(), options);
             return;
         }
         if (ctx instanceof ValueTypeMemberReferenceContext) {
-            // TODO: resolve enum member references to their underlying value at
-            // compile time once enums/declarations are tracked.
+            const ref = ctx.typeMemberReference();
+            const resolved = this.enumResolver?.resolveEnumMember(
+                ref._typeName?.text,
+                ref._memberName.text,
+                options?.enumHint,
+            );
+            if (resolved !== undefined) {
+                if (typeof resolved.value === "number") {
+                    this.pushNumber(resolved.value);
+                } else {
+                    this.pushString(resolved.value);
+                }
+                return;
+            }
+            // Fall back to the qualified name as a plain string.
             this.pushString(ctx.text);
             return;
         }
@@ -172,7 +200,7 @@ export class ExpressionCompiler {
         this.invoke("getContext");
     }
 
-    private compileFunctionCall(ctx: Function_callContext): void {
+    private compileFunctionCall(ctx: Function_callContext, options?: CompileOptions): void {
         const name = ctx.FUNC_ID().text;
         const args = ctx.expression();
 
@@ -200,7 +228,7 @@ export class ExpressionCompiler {
         // Push arguments in reverse so that the first argument is on top of the
         // stack, matching the "param1 = top" convention used by Tzo callables.
         for (let i = args.length - 1; i >= 0; i--) {
-            this.compile(args[i]);
+            this.compile(args[i], options);
         }
         this.invoke(`${YARN_FUNCTION_PREFIX}${name}`);
     }
@@ -218,7 +246,7 @@ export class ExpressionCompiler {
     }
 }
 
-function unquoteYarnString(text: string): string {
+export function unquoteYarnString(text: string): string {
     let inner = text;
     if (inner.length >= 2 && inner.startsWith('"') && inner.endsWith('"')) {
         inner = inner.substring(1, inner.length - 1);
@@ -231,6 +259,18 @@ function asStringLiteral(ctx: ExpressionContext): string | undefined {
         const value = ctx.value();
         if (value instanceof ValueStringContext) {
             return unquoteYarnString(value.STRING().text);
+        }
+    }
+    return undefined;
+}
+
+// Exposed for the listener, which needs to inspect enum member references to
+// track variable types.
+export function typeMemberReferenceOf(ctx: ExpressionContext): ValueTypeMemberReferenceContext | undefined {
+    if (ctx instanceof ExpValueContext) {
+        const value = ctx.value();
+        if (value instanceof ValueTypeMemberReferenceContext) {
+            return value;
         }
     }
     return undefined;

@@ -1,12 +1,12 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
-import { Command_formatted_textContext, Declare_statementContext, ExpressionContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, JumpToNodeNameContext, JumpToExpressionContext, DetourToNodeNameContext, DetourToExpressionContext, Return_statementContext, Once_statementContext, Once_primary_clauseContext, Once_alternate_clauseContext, Title_headerContext, Line_group_itemContext, Line_group_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
+import { Command_formatted_textContext, Declare_statementContext, Enum_case_statementContext, Enum_statementContext, ExpressionContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, JumpToNodeNameContext, JumpToExpressionContext, DetourToNodeNameContext, DetourToExpressionContext, Return_statementContext, Once_statementContext, Once_primary_clauseContext, Once_alternate_clauseContext, Title_headerContext, Line_group_itemContext, Line_group_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
 import { ANTLRErrorListener, ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
 import u from "unist-builder";
 import { InvokeFunctionInstruction, PushNumberInstruction, PushStringInstruction, TzoVMState } from "tzo";
 import { Tokenizer, pushString, pushNumber, invokeFunction } from "tzo";
-import { ExpressionCompiler, YARN_FUNCTION_PREFIX, nodeVisitCountKey } from "./expression";
+import { ExpressionCompiler, YARN_FUNCTION_PREFIX, nodeVisitCountKey, typeMemberReferenceOf, unquoteYarnString } from "./expression";
 
 const TZO_cleanstack = `stacksize jgz { pop } stacksize jgz { 9 ppc - goto }`;
 const TZO_QVM_get_response = `ppc 5 + getResponse goto`;
@@ -17,6 +17,12 @@ export class Listener implements YarnSpinnerParserListener {
     onceCounter = 0;
     nodeTitles: string[] = [];
     currentNodeTitle: string = undefined;
+    // Enum support
+    enums: { [enumName: string]: { [caseName: string]: string | number | undefined } } = {};
+    enumCaseOrder: { [enumName: string]: string[] } = {};
+    currentEnum: string = undefined;
+    variableEnums: { [varName: string]: string } = {};
+    ifStack: Array<{ elseIfsRemaining: number, hasElse: boolean, openElse: number, clauseCursor: number }> = [];
     expr: ExpressionCompiler;
 
     qvmState = u("questmarkVMState", {
@@ -32,7 +38,7 @@ export class Listener implements YarnSpinnerParserListener {
 
     constructor(tokenStream: CommonTokenStream) {
         this.tokenStream = tokenStream;
-        this.expr = new ExpressionCompiler(i => this.q(i));
+        this.expr = new ExpressionCompiler(i => this.q(i), this);
     }
 
     q(a: InvokeFunctionInstruction | PushStringInstruction | PushNumberInstruction) {
@@ -320,74 +326,186 @@ export class Listener implements YarnSpinnerParserListener {
         // Non-title headers (for example 'tags') carry no QuestVM behaviour.
     }
 
+    enterEnum_statement(ctx: Enum_statementContext) {
+        this.currentEnum = ctx._name.text;
+        this.enums[this.currentEnum] = {};
+        this.enumCaseOrder[this.currentEnum] = [];
+    }
+
+    enterEnum_case_statement(ctx: Enum_case_statementContext) {
+        const caseName = ctx._name.text;
+        const raw = ctx.value() !== undefined ? this.literalValue(ctx.value()) : undefined;
+        this.enums[this.currentEnum][caseName] = raw;
+        this.enumCaseOrder[this.currentEnum].push(caseName);
+    }
+
+    exitEnum_statement(ctx: Enum_statementContext) {
+        // Cases without explicit raw values get monotonically increasing numbers.
+        let next = 0;
+        for (const caseName of this.enumCaseOrder[this.currentEnum] ?? []) {
+            let value = this.enums[this.currentEnum][caseName];
+            if (value === undefined) {
+                value = next;
+                this.enums[this.currentEnum][caseName] = value;
+            }
+            if (typeof value === "number") {
+                next = value + 1;
+            }
+        }
+        this.currentEnum = undefined;
+    }
+
+    literalValue(ctx: ValueContext): string | number | undefined {
+        if (ctx instanceof ValueNumberContext) {
+            return parseFloat(ctx.NUMBER().text);
+        }
+        if (ctx instanceof ValueStringContext) {
+            return unquoteYarnString(ctx.STRING().text);
+        }
+        if (ctx instanceof ValueTrueContext) {
+            return 1;
+        }
+        if (ctx instanceof ValueFalseContext) {
+            return 0;
+        }
+        return undefined;
+    }
+
+    resolveEnumMember(typeName: string | undefined, memberName: string, hint?: string) {
+        if (typeName !== undefined) {
+            const cases = this.enums[typeName];
+            if (cases !== undefined && cases[memberName] !== undefined) {
+                return { value: cases[memberName], enumName: typeName };
+            }
+            return undefined;
+        }
+        if (hint !== undefined) {
+            const cases = this.enums[hint];
+            if (cases !== undefined && cases[memberName] !== undefined) {
+                return { value: cases[memberName], enumName: hint };
+            }
+        }
+        // Implicit `.Member`: only valid if exactly one enum has that case.
+        const matches = Object.keys(this.enums).filter(e => this.enums[e][memberName] !== undefined);
+        if (matches.length === 1) {
+            return { value: this.enums[matches[0]][memberName], enumName: matches[0] };
+        }
+        return undefined;
+    }
+
+    enumTypeOfExpression(ctx: ExpressionContext): string | undefined {
+        const valueRef = typeMemberReferenceOf(ctx);
+        if (valueRef !== undefined) {
+            const ref = valueRef.typeMemberReference();
+            return this.resolveEnumMember(ref._typeName?.text, ref._memberName.text, undefined)?.enumName;
+        }
+        return undefined;
+    }
+
     enterDeclare_statement(ctx: Declare_statementContext) {
+        const name = ctx.variable().VAR_ID().text.substring(1);
+        const explicitType = ctx._type?.text;
+        const hint = this.variableEnums[name] ?? (explicitType !== undefined && this.enums[explicitType] !== undefined ? explicitType : undefined);
+
         // Emit a guarded default: only set the value if it isn't set already,
         // so that host-provided / persisted values are not clobbered.
-        const name = ctx.variable().VAR_ID().text.substring(1);
         this.q(pushString(name));
         this.q(invokeFunction("hasContext"));
         this.q(invokeFunction("not"));
         this.q(invokeFunction("jgz"));
         this.q(invokeFunction("{"));
-        this.expr.compile(ctx.expression());
+        this.expr.compile(ctx.expression(), { enumHint: hint });
         this.q(pushString(name));
         this.q(invokeFunction("setContext"));
         this.q(invokeFunction("}"));
+
+        // Track the declared enum type for later implicit `.Member` resolution.
+        const enumType = explicitType !== undefined && this.enums[explicitType] !== undefined
+            ? explicitType
+            : this.enumTypeOfExpression(ctx.expression());
+        if (enumType !== undefined) {
+            this.variableEnums[name] = enumType;
+        }
     }
 
     exitSet_statement(ctx: Set_statementContext) {
         let varName = ctx.variable().VAR_ID().text.substring(1);
         let op = (ctx as any)._op?.text;
+        const hint = this.variableEnums[varName];
         // Compile the right-hand side; its value is left on the stack.
-        this.expr.compile(ctx.expression());
+        this.expr.compile(ctx.expression(), { enumHint: hint });
         if (op === undefined || op === "=" || op === "to") {
             this.q(pushString(varName));
             this.q(invokeFunction("setContext"));
-            return;
-        }
-        // Compound assignment: current value <op> rhs, then store the result.
-        this.q(pushString(varName));
-        this.q(invokeFunction("getContext"));
-        const opFunctions: { [key: string]: string } = {
-            "+=": "+", "-=": "-", "*=": "*", "/=": "/", "%=": "%",
-        };
-        const opFn = opFunctions[op];
-        if (opFn === undefined) {
-            console.warn(`UNIMPLEMENTED: set operator '${op}'`);
+        } else {
+            // Compound assignment: current value <op> rhs, then store the result.
+            this.q(pushString(varName));
+            this.q(invokeFunction("getContext"));
+            const opFunctions: { [key: string]: string } = {
+                "+=": "+", "-=": "-", "*=": "*", "/=": "/", "%=": "%",
+            };
+            const opFn = opFunctions[op];
+            if (opFn === undefined) {
+                console.warn(`UNIMPLEMENTED: set operator '${op}'`);
+                this.q(invokeFunction("setContext"));
+                return;
+            }
+            this.q(invokeFunction(opFn));
+            this.q(pushString(varName));
             this.q(invokeFunction("setContext"));
-            return;
         }
-        this.q(invokeFunction(opFn));
-        this.q(pushString(varName));
-        this.q(invokeFunction("setContext"));
+
+        // Track enum types for later implicit `.Member` resolution.
+        const enumType = this.enumTypeOfExpression(ctx.expression());
+        if (enumType !== undefined) {
+            this.variableEnums[varName] = enumType;
+        }
     }
 
     enterIf_statement(ctx: If_statementContext) {
-        let ifCtx = undefined;
-        let elseCtx = undefined;
-        ctx.children.forEach(c => {
-            if ((c as any).ruleIndex === YarnSpinnerParser.RULE_if_clause) {
-                ifCtx = c;
-            } else if ((c as any).ruleIndex === YarnSpinnerParser.RULE_else_clause) {
-                elseCtx = c;
-            }
+        const elseIfs = ctx.else_if_clause();
+        const elseClause = ctx.else_clause();
+        const clausesAfter = elseIfs.length + (elseClause !== undefined ? 1 : 0);
+
+        this.expr.compile(ctx.if_clause().expression());
+        if (clausesAfter > 0) {
+            this.q(invokeFunction("dup"));
+        }
+        this.q(invokeFunction("jgz"));
+        this.q(invokeFunction("{"));
+
+        this.ifStack.push({
+            elseIfsRemaining: elseIfs.length,
+            hasElse: elseClause !== undefined,
+            openElse: 0,
+            clauseCursor: 0,
         });
-        this.handleIfElse(ifCtx, elseCtx);
     }
 
-    handleIfElse(ifStatement?: If_clauseContext, elseStatement?: Else_clauseContext) {
-        if (ifStatement === undefined) {
-            return;
-        }
-        this.expr.compile(ifStatement.expression());
-        if (elseStatement !== undefined) {
+    exitIf_clause (ctx: If_clauseContext) {
+        this.q(invokeFunction("}"));
+    }
+
+    enterElse_if_clause (ctx) {
+        const frame = this.ifStack[this.ifStack.length - 1];
+        frame.clauseCursor += 1;
+        const remainingAfterThis = (frame.elseIfsRemaining - frame.clauseCursor) + (frame.hasElse ? 1 : 0);
+
+        // Close the previous else-region's condition and open a nested region
+        // that only runs when the previous condition was false.
+        this.q(invokeFunction("jz"));
+        this.q(invokeFunction("{"));
+        frame.openElse += 1;
+
+        this.expr.compile(ctx.expression());
+        if (remainingAfterThis > 0) {
             this.q(invokeFunction("dup"));
         }
         this.q(invokeFunction("jgz"));
         this.q(invokeFunction("{"));
     }
 
-    exitIf_clause (ctx: If_clauseContext) {
+    exitElse_if_clause (ctx) {
         this.q(invokeFunction("}"));
     }
 
@@ -398,6 +516,14 @@ export class Listener implements YarnSpinnerParserListener {
 
     exitElse_clause (ctx: Else_clauseContext) {
         this.q(invokeFunction("}"));
+    }
+
+    exitIf_statement (ctx: If_statementContext) {
+        const frame = this.ifStack.pop();
+        // Close any else-regions opened for else-if clauses.
+        for (let i = 0; i < frame.openElse; i++) {
+            this.q(invokeFunction("}"));
+        }
     }
 
     getQVMState() {
