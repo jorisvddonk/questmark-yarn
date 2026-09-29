@@ -61,9 +61,13 @@ const OPERATOR_MAP: { [key: string]: string } = {
     "+": "+",
     "-": "-",
     "<": "lt",
+    "lt": "lt",
     "<=": "gt",
+    "lte": "gt",
     ">": "gt",
+    "gt": "gt",
     ">=": "lt",
+    "gte": "lt",
     "==": "eq",
     "is": "eq",
     "eq": "eq",
@@ -78,7 +82,7 @@ const OPERATOR_MAP: { [key: string]: string } = {
 };
 
 // Operators whose result is the negation of their base Tzo opcode.
-const NEGATED_OPERATORS = new Set([">=", "<=", "!=", "neq", "xor", "^"]);
+const NEGATED_OPERATORS = new Set([">=", "gte", "<=", "lte", "!=", "neq", "xor", "^"]);
 
 /**
  * Compiles a Yarn Spinner expression parse tree into Tzo instructions.
@@ -88,7 +92,12 @@ const NEGATED_OPERATORS = new Set([">=", "<=", "!=", "neq", "xor", "^"]);
  * strings as Tzo strings.
  */
 export class ExpressionCompiler {
-    constructor(private emit: EmitInstruction, private enumResolver?: EnumResolver) { }
+    constructor(
+        private emit: EmitInstruction,
+        private enumResolver?: EnumResolver,
+        private variableTracker?: (name: string) => void,
+        private variableTypeResolver?: (name: string) => string | undefined,
+    ) { }
 
     compile(ctx: ExpressionContext, options?: CompileOptions): void {
         if (ctx instanceof ExpParensContext) {
@@ -135,6 +144,14 @@ export class ExpressionCompiler {
     }
 
     private binary(left: ExpressionContext, right: ExpressionContext, op: string, options?: CompileOptions): void {
+        // Yarn's '+' is overloaded: string concatenation when either side is a
+        // string, numeric addition otherwise.
+        if (op === "+" && (this.isStringExpression(left) || this.isStringExpression(right))) {
+            this.compile(right, options);
+            this.compile(left, options);
+            this.invoke("concat");
+            return;
+        }
         const base = OPERATOR_MAP[op];
         if (base === undefined) {
             throw new Error(`ExpressionCompiler: unsupported operator '${op}'`);
@@ -145,6 +162,31 @@ export class ExpressionCompiler {
         if (NEGATED_OPERATORS.has(op)) {
             this.invoke("not");
         }
+    }
+
+    private isStringExpression(ctx: ExpressionContext): boolean {
+        if (ctx instanceof ExpParensContext) {
+            return this.isStringExpression(ctx.expression());
+        }
+        if (ctx instanceof ExpAddSubContext && ctx._op.text === "+") {
+            return this.isStringExpression(ctx.expression(0)) || this.isStringExpression(ctx.expression(1));
+        }
+        if (ctx instanceof ExpValueContext) {
+            const value = ctx.value();
+            if (value instanceof ValueStringContext) {
+                return true;
+            }
+            if (value instanceof ValueVarContext) {
+                const name = value.variable().VAR_ID().text.substring(1);
+                return this.variableTypeResolver?.(name) === "string";
+            }
+            if (value instanceof ValueTypeMemberReferenceContext) {
+                const ref = value.typeMemberReference();
+                const resolved = this.enumResolver?.resolveEnumMember(ref._typeName?.text, ref._memberName.text, undefined);
+                return resolved !== undefined && typeof resolved.value === "string";
+            }
+        }
+        return false;
     }
 
     private compileValue(ctx: ValueContext, options?: CompileOptions): void {
@@ -196,7 +238,11 @@ export class ExpressionCompiler {
 
     private compileVariable(varId: string): void {
         // varId is like "$gold_amount"; the context key drops the leading '$'.
-        this.pushString(varId.substring(1));
+        const name = varId.substring(1);
+        if (this.variableTracker !== undefined) {
+            this.variableTracker(name);
+        }
+        this.pushString(name);
         this.invoke("getContext");
     }
 

@@ -8,10 +8,12 @@ import program from "commander";
 import { getStackParams, VM } from "tzo";
 import { Stack } from "tzo";
 import { parse } from "./parser";
+import { SALIENCY_STRATEGIES, SaliencyStrategy } from "./saliency";
 
 program
     .option('--input <path>', "Load source .yarn file from path")
     .option('--choice <n>', "Zero-based choice index to select when prompted", "0")
+    .option('--saliency <strategy>', `Saliency strategy (${SALIENCY_STRATEGIES.join(", ")})`, "best-least-recently-viewed")
     .parse(process.argv);
 
 if (!program.input) {
@@ -20,9 +22,14 @@ if (!program.input) {
 }
 
 const choiceIndex = Number.parseInt(program.choice, 10) || 0;
+const saliency = program.saliency as SaliencyStrategy;
+if (!SALIENCY_STRATEGIES.includes(saliency)) {
+    console.error(`Unknown saliency strategy '${saliency}'. Valid: ${SALIENCY_STRATEGIES.join(", ")}`);
+    process.exit(1);
+}
 
 const input = fs.readFileSync(program.input).toString();
-const result = parse(input);
+const result = parse(input, undefined, { saliency });
 
 const output: string[] = [];
 const responses: { response: string, pc: number }[] = [];
