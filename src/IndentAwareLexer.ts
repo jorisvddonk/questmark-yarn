@@ -1,10 +1,9 @@
-
-
 ///  <summary>
 ///  A Lexer subclass that detects newlines and generates indent and
 ///  dedent tokens accordingly.
+///  </summary>
 
-import { CharStream, CommonToken, Lexer, Token, TokenSource, Vocabulary } from "antlr4ts";
+import { CharStream, CommonToken, Lexer, Token, TokenSource } from "antlr4ts";
 
 export interface Warning {
     token: Token,
@@ -12,21 +11,53 @@ export interface Warning {
 }
 
 import { YarnSpinnerLexer } from "./grammars/YarnSpinnerLexer";
+
 /// <summary>
 /// A Lexer subclass that detects newlines and generates indent and
 /// dedent tokens accordingly.
 /// </summary>
 export abstract class IndentAwareLexer extends Lexer {
     /// <summary>
-    /// A stack keeping track of the levels of indentations we have
-    /// seen so far.
+    /// Whether the lexer is currently lexing an expression that is part
+    /// of a 'when' clause. Set by <see cref="SetInWhenClause"/> and read
+    /// by <see cref="IsInWhenClause"/>.
     /// </summary>
-    private indents: Array<number> = new Array<number>();
+    private inWhenClause: boolean = false;
+
+    /// <summary>
+    /// Returns a value indicating whether the lexer is currently lexing an
+    /// expression that's part of a 'when' clause.
+    /// </summary>
+    public IsInWhenClause(): boolean {
+        return this.inWhenClause;
+    }
+
+    /// <summary>
+    /// Sets a value indicating whether the lexer is currently lexing an
+    /// expression that's part of a 'when' clause.
+    /// </summary>
+    public SetInWhenClause(val: boolean): void {
+        this.inWhenClause = val;
+    }
+
+    /// <summary>
+    /// Looks ahead 1 character in the input stream and returns a value
+    /// indicating whether the character is whitespace or the '>' character.
+    /// </summary>
+    public IsEndOfCommandKeyword(): boolean {
+        const next = (this.inputStream as any).LA(1);
+        if (next === -1) {
+            return false;
+        }
+        const c = String.fromCharCode(next);
+        return c === ">" || /\s/.test(c);
+    }
+
     /// <summary>
     /// The collection of tokens that we have seen, but have not yet
     /// returned. This is needed when NextToken encounters a newline,
     /// which means we need to buffer indents or dedents. NextToken
-    /// only returns a single <see cref="Token"/> at a time, which
+    /// only returns a single Token at a time, which
     /// means we use this list to buffer it.
     /// </summary>
     private pendingTokens: Array<Token> = new Array<Token>();
@@ -35,6 +66,37 @@ export abstract class IndentAwareLexer extends Lexer {
     /// generated.
     /// </summary>
     private warnings: Array<Warning> = new Array<Warning>();
+
+    /// <summary>
+    /// A stack keeping track of the levels of indentations we have
+    /// seen so far that are relevant to shortcuts.
+    /// </summary>
+    private unbalancedIndents: Array<number> = new Array<number>();
+
+    /// <summary>
+    /// Keeps track of the last indentation encountered.
+    /// This is used to see if depth has changed between lines.
+    /// </summary>
+    private lastIndent: number = 0;
+
+    /// <summary>
+    /// A flag to say the last line observed was a shortcut or not.
+    /// Used to determine if tracking indents needs to occur.
+    /// </summary>
+    private lineContainsIndentTrackingToken: boolean = false;
+
+    /// <summary>
+    /// Holds the last observed token from the stream.
+    /// Used to see if a line is blank or not.
+    /// </summary>
+    private lastToken: Token | undefined = undefined;
+
+    /// <summary>
+    /// Holds the line number of the last seen indent-tracking content. Lets
+    /// us work out if the blank line needs to end the option.
+    /// </summary>
+    private lastSeenIndentTrackingContent: number = -1;
+
     /// <summary>
     /// Initializes a new instance of the <see
     /// cref="IndentAwareLexer"/> class.
@@ -43,45 +105,42 @@ export abstract class IndentAwareLexer extends Lexer {
     constructor(input: CharStream) {
         super(input);
     }
+
     /// <summary>
     /// Gets the collection of warnings determined during lexing.
     /// </summary>
     public get Warnings(): Array<Warning> {
         return this.warnings;
     }
+
     /// <inheritdoc/>
     public nextToken(): Token {
+        let tokenToReturn: Token | undefined;
         if (this._hitEOF && this.pendingTokens.length > 0) {
             // We have hit the EOF, but we have tokens still pending.
             // Start returning those tokens.
-            return this.pendingTokens.shift() as Token;
-        } else
-            if (this.inputStream.size == 0) {
-                // There's no more incoming symbols, and we don't have
-                // anything pending, so we've hit the end of the file.
-                this._hitEOF = true;
-                // Return the EOF token.
-                return new CommonToken(Token.EOF, `<EOF>`);
+            tokenToReturn = this.pendingTokens.shift();
+        } else if (this.inputStream.size === 0) {
+            // There's no more incoming symbols, and we don't have
+            // anything pending, so we've hit the end of the file.
+            this._hitEOF = true;
+            // Return the EOF token.
+            tokenToReturn = new CommonToken(Token.EOF, `<EOF>`);
+        } else {
+            // Get the next token, which will enqueue one or more new
+            // tokens into the pending tokens queue.
+            this.CheckNextToken();
+            if (this.pendingTokens.length > 0) {
+                // Then, return a single token from the queue.
+                tokenToReturn = this.pendingTokens.shift();
             } else {
-                // Get the next token, which will enqueue one or more new
-                // tokens into the pending tokens queue.
-                this.CheckNextToken();
-                if (this.pendingTokens.length > 0) {
-                    // Then, return a single token from the queue.
-                    return this.pendingTokens.shift() as Token;
-                } else {
-                    // Nothing left in the queue. Return null.
-                    console.log("??????");
-                        let token = this._factory.create(
-                            this._tokenFactorySourcePair, this._type, this._text, this._channel,
-                            this._tokenStartCharIndex, this.charIndex - 1, this._tokenStartLine,
-                            this._tokenStartCharPositionInLine);
-   
-                    this._token = token;
-                    return token;
-                }
+                // Nothing left in the queue. Return null.
+                tokenToReturn = undefined;
             }
+        }
+        return tokenToReturn as Token;
     }
+
     private CheckNextToken(): void {
         let currentToken = super.nextToken();
         switch (currentToken.type) {
@@ -96,66 +155,112 @@ export abstract class IndentAwareLexer extends Lexer {
                 // enqueues the EOF.
                 this.HandleEndOfFileToken(currentToken);
                 break;
+            case YarnSpinnerLexer.LINE_GROUP_ARROW:
+            case YarnSpinnerLexer.SHORTCUT_ARROW:
+                this.pendingTokens.push(currentToken);
+                this.lineContainsIndentTrackingToken = true;
+                break;
+            case YarnSpinnerLexer.BODY_END:
+                // we are at the end of the node
+                // depth no longer matters
+                // clear the stack
+                this.lineContainsIndentTrackingToken = false;
+                this.lastIndent = 0;
+                this.unbalancedIndents = new Array<number>();
+                this.lastSeenIndentTrackingContent = -1;
+
+                this.pendingTokens.push(currentToken);
+                break;
             default:
                 this.pendingTokens.push(currentToken);
                 break;
         }
+        this.lastToken = currentToken;
     }
+
     private HandleEndOfFileToken(currentToken: Token): void {
         // We're at the end of the file. Emit as many dedents as we
         // currently have on the stack.
-        while (this.indents.length > 0) {
-            let indent = this.indents.pop();
-            this.InsertToken(`<dedent: ${indent}>`, YarnSpinnerLexer.DEDENT);
+        while (this.unbalancedIndents.length > 0) {
+            this.unbalancedIndents.pop();
+            this.InsertToken("", YarnSpinnerLexer.DEDENT);
         }
         // Finally, enqueue the EOF token.
         this.pendingTokens.push(currentToken);
     }
+
     private HandleNewLineToken(currentToken: Token): void {
         // We're about to go to a new line. Look ahead to see how
         // indented it is.
+
         // insert the current NEWLINE token
         this.pendingTokens.push(currentToken);
+
         let currentIndentationLength: number = this.GetLengthOfNewlineToken(currentToken);
-        let previousIndent: number = 0;
-        if (this.indents.length > 0) {
-            previousIndent = this.indents[this.indents.length - 1];
-        } else {
-            previousIndent = 0;
+
+        // we have seen an option somewhere
+        if (this.lastSeenIndentTrackingContent !== -1) {
+            // we are a blank line
+            if (currentToken.type === this.lastToken?.type) {
+                // is the option content directly above us?
+                if (this.line - this.lastSeenIndentTrackingContent === 1) {
+                    this.InsertToken("", YarnSpinnerLexer.BLANK_LINE_FOLLOWING_OPTION);
+                }
+                // disabling the option tracking
+                this.lastSeenIndentTrackingContent = -1;
+            }
         }
-        if (currentIndentationLength > previousIndent) {
-            // We are more indented on this line than on the previous
-            // line. Insert an indentation token, and record the new
-            // indent level.
-            this.indents.push(currentIndentationLength);
-            this.InsertToken(`<indent to ${currentIndentationLength}>`, YarnSpinnerLexer.INDENT);
-        } else
-            if (currentIndentationLength < previousIndent) {
-                // We are less indented on this line than on the previous
-                // line. For each level of indentation we're now lower
-                // than, insert a dedent token and remove that indentation
-                // level.
-                while (currentIndentationLength < previousIndent) {
-                    // Remove this indent from the stack and generate a
-                    // dedent token for it.
-                    previousIndent = this.indents.pop() as number;
-                    this.InsertToken(`<dedent from ${previousIndent}>`, YarnSpinnerLexer.DEDENT);
-                    // Figure out the level of indentation we're on -
-                    // either the top of the indent stack (if we have any
-                    // indentations left), or zero.
-                    if (this.indents.length > 0) {
-                        previousIndent = this.indents[this.indents.length - 1];
-                    } else {
-                        previousIndent = 0;
-                    }
+
+        // we need to actually see if there is a shortcut *somewhere* above us
+        // if there isn't we just chug on without worrying
+        if (this.lineContainsIndentTrackingToken) {
+            // we have a shortcut *somewhere* above us
+            // that means we need to check our depth
+            // and compare it to the shortcut depth
+
+            // if the depth of the current line is greater than the previous one
+            // we need to add this depth to the indents stack
+            if (currentIndentationLength > this.lastIndent) {
+                this.unbalancedIndents.push(currentIndentationLength);
+                this.InsertToken("", YarnSpinnerLexer.INDENT);
+            }
+
+            // we've now started tracking the indentation, or ignored it, so can turn this off
+            this.lineContainsIndentTrackingToken = false;
+            this.lastSeenIndentTrackingContent = this.line;
+        }
+
+        // now we need to see if the current depth requires any indents or dedents
+        // we do this by first checking to see if there are any unbalanced indents
+        if (this.unbalancedIndents.length > 0) {
+            let top: number = this.unbalancedIndents[this.unbalancedIndents.length - 1];
+
+            // while there are unbalanced indents
+            // we need to check if the current line is shallower than the indent stack
+            // if it is then we emit a dedent and continue checking
+            while (currentIndentationLength < top) {
+                this.InsertToken("", YarnSpinnerLexer.DEDENT);
+                this.unbalancedIndents.pop();
+                if (this.unbalancedIndents.length > 0) {
+                    top = this.unbalancedIndents[this.unbalancedIndents.length - 1];
+                } else {
+                    top = 0;
+                    // we've dedented all the way out of the shortcut
+                    // as such we are done with the option block
+                    this.lastSeenIndentTrackingContent = this.line;
                 }
             }
+        }
+
+        // finally we update the last seen depth
+        this.lastIndent = currentIndentationLength;
     }
+
     // Given a NEWLINE token, return the length of the indentation
     // following it by counting the spaces and tabs after it.
     private GetLengthOfNewlineToken(currentToken: Token): number {
         if (currentToken.type != YarnSpinnerLexer.NEWLINE) {
-            throw new Error(`${`GetLengthOfNewlineToken`} expected ${`currentToken`} to be a ${`NEWLINE`} (${YarnSpinnerLexer.NEWLINE}), not ${currentToken.type}`);
+            throw new Error(`GetLengthOfNewlineToken expected currentToken to be a NEWLINE (${YarnSpinnerLexer.NEWLINE}), not ${currentToken.type}`);
         }
         let length: number = 0;
         let sawSpaces: boolean = false;
@@ -185,6 +290,7 @@ export abstract class IndentAwareLexer extends Lexer {
         }
         return length;
     }
+
     /// <summary>
     /// Inserts a new token with the given text and type, as though it
     /// had appeared in the input stream.
@@ -196,14 +302,13 @@ export abstract class IndentAwareLexer extends Lexer {
         // ***
         // https://www.antlr.org/api/Java/org/antlr/v4/runtime/Lexer.html#_tokenStartCharIndex
         let startIndex: number = this._tokenStartCharIndex + this.text.length;
-        this.InsertToken2(startIndex, startIndex - 1, text, type, this.line/*, this.column*/);
+        this.InsertToken2(startIndex, startIndex - 1, text, type, this.line);
     }
 
-    private InsertToken2(startIndex: number, stopIndex: number, text: string, type: number, line: number/*, column: number*/): void {
+    private InsertToken2(startIndex: number, stopIndex: number, text: string, type: number, line: number): void {
         let token: CommonToken = (() => {
-            let obj = new CommonToken(type, text, { source: this, stream: this.inputStream }, YarnSpinnerLexer.DEFAULT_TOKEN_CHANNEL, startIndex, stopIndex);
+            let obj = new CommonToken(type, text, { source: this as TokenSource, stream: this.inputStream }, YarnSpinnerLexer.DEFAULT_TOKEN_CHANNEL, startIndex, stopIndex);
             obj.line = line;
-            //(obj as any)._column = column; // ???
             return obj;
         })();
         this.pendingTokens.push(token);

@@ -17,8 +17,8 @@
     "start": "ts-node src/cli.ts",
     "wp_build": "webpack build --config webpack.config.js",
     "fix_antlr_grammar_ts": "ts-node src/util/fix_antlr_grammar_ts.ts",
-    "antlr4ts-yarnspinnerlexer": "antlr4ts -visitor grammars/YarnSpinnerLexer.g4",
-    "antlr4ts-yarnspinnerparser": "antlr4ts -visitor grammars/YarnSpinnerParser.g4",
+    "antlr4ts-yarnspinnerlexer": "antlr4ts -visitor -Xexact-output-dir -o src/grammars src/grammars/YarnSpinnerLexer.g4",
+    "antlr4ts-yarnspinnerparser": "antlr4ts -visitor -Xexact-output-dir -lib src/grammars -o src/grammars src/grammars/YarnSpinnerParser.g4",
     "antlr4ts": "npm run antlr4ts-yarnspinnerlexer && npm run antlr4ts-yarnspinnerparser && npm run fix_antlr_grammar_ts"
   },
   "bin": {

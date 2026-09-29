@@ -1,5 +1,5 @@
 import { YarnSpinnerParserListener } from './grammars/YarnSpinnerParserListener'
-import { Command_formatted_textContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, Jump_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
+import { Command_formatted_textContext, HeaderContext, If_clauseContext, Else_clauseContext, If_statementContext, JumpToNodeNameContext, JumpToExpressionContext, DetourToNodeNameContext, DetourToExpressionContext, Return_statementContext, Once_statementContext, Once_primary_clauseContext, Once_alternate_clauseContext, Title_headerContext, Line_group_itemContext, Line_group_statementContext, Line_formatted_textContext, Line_statementContext, NodeContext, Set_statementContext, Shortcut_optionContext, Shortcut_option_statementContext, ValueContext, ValueFalseContext, ValueNumberContext, ValueTrueContext, VariableContext, YarnSpinnerParser, ValueStringContext } from './grammars/YarnSpinnerParser'
 import { ParseTreeWalker } from 'antlr4ts/tree/ParseTreeWalker'
 import { ANTLRErrorListener, ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
 import { YarnSpinnerLexer } from './grammars/YarnSpinnerLexer';
@@ -13,6 +13,7 @@ export class Listener implements YarnSpinnerParserListener {
     tzoTokenizer = new Tokenizer();
     indentLevels: number[] = [];
     foundFirstNode = false;
+    onceCounter = 0;
 
     qvmState = u("questmarkVMState", {
         stack: [],
@@ -71,6 +72,7 @@ export class Listener implements YarnSpinnerParserListener {
         switch (context._parent?.ruleIndex) {
             case YarnSpinnerParser.RULE_shortcut_option:
             case YarnSpinnerParser.RULE_shortcut_option_statement:
+            case YarnSpinnerParser.RULE_line_group_item:
                 //console.log(`option [${this.getIndentLevel()}] ${text}`);
                 this.q(invokeFunction("ppc")); // push address of effect body to stack
                 this.q(pushNumber(4));
@@ -116,6 +118,24 @@ export class Listener implements YarnSpinnerParserListener {
         this.indentLevels.pop();
     }
 
+    enterLine_group_item(ctx: Line_group_itemContext) {
+        let x = this.tokenStream.getTokens();
+        let z = x.slice((ctx._start as any).index, (ctx._stop as any).index);
+        let indents = z.filter(e => e.type === YarnSpinnerParser.INDENT);
+        this.indentLevels.push(indents.length);
+    }
+
+    exitLine_group_statement(ctx: Line_group_statementContext) {
+        this.qTzo(TZO_QVM_get_response);
+    }
+
+    exitLine_group_item(ctx: Line_group_itemContext) {
+        this.q(invokeFunction("goto")); // go back to where we were before "getResponse" was called
+        this.q(invokeFunction("}")); // option effect body end
+        this.q(invokeFunction("response"));
+        this.indentLevels.pop();
+    }
+
     enterCommand_formatted_text(ctx: Command_formatted_textContext) {
         //q(invokeFunction(ctx.COMMAND_TEXT().join("")));
         let text = ctx.COMMAND_TEXT().join("");
@@ -126,10 +146,68 @@ export class Listener implements YarnSpinnerParserListener {
         }
     }
 
-    enterJump_statement(ctx: Jump_statementContext) {
+    enterJumpToNodeName(ctx: JumpToNodeNameContext) {
         this.qTzo(TZO_cleanstack);
         this.q(pushString(ctx.ID().text));
         this.q(invokeFunction("goto"));
+    }
+
+    enterJumpToExpression(ctx: JumpToExpressionContext) {
+        console.warn("UNIMPLEMENTED: jump to expression");
+    }
+
+    // --- Yarn Spinner 3 features ---
+
+    enterDetourToNodeName(ctx: DetourToNodeNameContext) {
+        console.warn("UNIMPLEMENTED: <<detour>> is not supported; content will fall through");
+    }
+
+    enterDetourToExpression(ctx: DetourToExpressionContext) {
+        console.warn("UNIMPLEMENTED: <<detour>> is not supported; content will fall through");
+    }
+
+    enterReturn_statement(ctx: Return_statementContext) {
+        console.warn("UNIMPLEMENTED: <<return>> is not supported");
+    }
+
+    enterOnce_statement(ctx: Once_statementContext) {
+        this.onceCounter += 1;
+        // condition: this once site has not been seen yet
+        this.q(pushString(this.onceLabel()));
+        this.q(invokeFunction("hasContext"));
+        this.q(invokeFunction("not"));
+        if (ctx.once_alternate_clause() !== undefined) {
+            this.q(invokeFunction("dup"));
+        }
+        this.q(invokeFunction("jgz"));
+        this.q(invokeFunction("{"));
+    }
+
+    enterOnce_primary_clause(ctx: Once_primary_clauseContext) {
+        if (ctx.expression() !== undefined) {
+            console.warn("UNIMPLEMENTED: <<once if <expression>>> conditions are ignored");
+        }
+        // mark this once site as having been seen
+        this.q(pushNumber(1));
+        this.q(pushString(this.onceLabel()));
+        this.q(invokeFunction("setContext"));
+    }
+
+    exitOnce_primary_clause(ctx: Once_primary_clauseContext) {
+        this.q(invokeFunction("}"));
+    }
+
+    enterOnce_alternate_clause(ctx: Once_alternate_clauseContext) {
+        this.q(invokeFunction("jz"));
+        this.q(invokeFunction("{"));
+    }
+
+    exitOnce_alternate_clause(ctx: Once_alternate_clauseContext) {
+        this.q(invokeFunction("}"));
+    }
+
+    onceLabel() {
+        return `_once_${this.onceCounter}`;
     }
 
     enterNode(ctx: NodeContext) {
@@ -142,19 +220,21 @@ export class Listener implements YarnSpinnerParserListener {
         this.q(invokeFunction("}"));
     }
 
-    enterHeader(ctx: HeaderContext) {
-        if (ctx.ID().text.toLowerCase() === "title") {
-            let id = ctx.REST_OF_LINE().text;
-            let z = invokeFunction("nop");
-            z.label = id;
-            this.q(z);
-            if (this.foundFirstNode === false) {
-                this.foundFirstNode = true;
-                // note: reverse order of these items below, as they're prepended
-                this.preq(invokeFunction("goto"));
-                this.preq(pushString(id));
-            }
+    enterTitle_header(ctx: Title_headerContext) {
+        let id = ctx.ID().text;
+        let z = invokeFunction("nop");
+        z.label = id;
+        this.q(z);
+        if (this.foundFirstNode === false) {
+            this.foundFirstNode = true;
+            // note: reverse order of these items below, as they're prepended
+            this.preq(invokeFunction("goto"));
+            this.preq(pushString(id));
         }
+    }
+
+    enterHeader(ctx: HeaderContext) {
+        // Non-title headers (for example 'tags') carry no QuestVM behaviour.
     }
 
     enterValueNumber(ctx: ValueNumberContext) {
@@ -275,7 +355,7 @@ export function parse(input: string, errorListener?: ANTLRErrorListener<any>) {
     let lexer = new YarnSpinnerLexer(inputStream);
     let tokenStream = new CommonTokenStream(lexer as any);
     let parser = new YarnSpinnerParser(tokenStream);
-    if (errorListener !== null) {
+    if (errorListener != null) {
         parser.addErrorListener(errorListener);
     }
     let tree = parser.dialogue();

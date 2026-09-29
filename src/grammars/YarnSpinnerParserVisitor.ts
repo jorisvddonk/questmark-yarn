@@ -1,15 +1,18 @@
-// Generated from grammars/YarnSpinnerParser.g4 by ANTLR 4.9.0-SNAPSHOT
+// @ts-nocheck
+// Generated from src/grammars/YarnSpinnerParser.g4 by ANTLR 4.9.0-SNAPSHOT
 
 
 import { ParseTreeVisitor } from "antlr4ts/tree/ParseTreeVisitor";
 
+import { LineConditionContext } from "./YarnSpinnerParser";
+import { LineOnceConditionContext } from "./YarnSpinnerParser";
 import { ValueNumberContext } from "./YarnSpinnerParser";
 import { ValueTrueContext } from "./YarnSpinnerParser";
 import { ValueFalseContext } from "./YarnSpinnerParser";
 import { ValueVarContext } from "./YarnSpinnerParser";
 import { ValueStringContext } from "./YarnSpinnerParser";
-import { ValueNullContext } from "./YarnSpinnerParser";
 import { ValueFuncContext } from "./YarnSpinnerParser";
+import { ValueTypeMemberReferenceContext } from "./YarnSpinnerParser";
 import { ExpParensContext } from "./YarnSpinnerParser";
 import { ExpNegativeContext } from "./YarnSpinnerParser";
 import { ExpNotContext } from "./YarnSpinnerParser";
@@ -19,10 +22,17 @@ import { ExpComparisonContext } from "./YarnSpinnerParser";
 import { ExpEqualityContext } from "./YarnSpinnerParser";
 import { ExpAndOrXorContext } from "./YarnSpinnerParser";
 import { ExpValueContext } from "./YarnSpinnerParser";
+import { JumpToNodeNameContext } from "./YarnSpinnerParser";
+import { JumpToExpressionContext } from "./YarnSpinnerParser";
+import { DetourToNodeNameContext } from "./YarnSpinnerParser";
+import { DetourToExpressionContext } from "./YarnSpinnerParser";
 import { DialogueContext } from "./YarnSpinnerParser";
 import { File_hashtagContext } from "./YarnSpinnerParser";
 import { NodeContext } from "./YarnSpinnerParser";
+import { Title_headerContext } from "./YarnSpinnerParser";
+import { When_headerContext } from "./YarnSpinnerParser";
 import { HeaderContext } from "./YarnSpinnerParser";
+import { Header_when_expressionContext } from "./YarnSpinnerParser";
 import { BodyContext } from "./YarnSpinnerParser";
 import { StatementContext } from "./YarnSpinnerParser";
 import { Line_statementContext } from "./YarnSpinnerParser";
@@ -33,6 +43,7 @@ import { ExpressionContext } from "./YarnSpinnerParser";
 import { ValueContext } from "./YarnSpinnerParser";
 import { VariableContext } from "./YarnSpinnerParser";
 import { Function_callContext } from "./YarnSpinnerParser";
+import { TypeMemberReferenceContext } from "./YarnSpinnerParser";
 import { If_statementContext } from "./YarnSpinnerParser";
 import { If_clauseContext } from "./YarnSpinnerParser";
 import { Else_if_clauseContext } from "./YarnSpinnerParser";
@@ -43,8 +54,18 @@ import { Command_statementContext } from "./YarnSpinnerParser";
 import { Command_formatted_textContext } from "./YarnSpinnerParser";
 import { Shortcut_option_statementContext } from "./YarnSpinnerParser";
 import { Shortcut_optionContext } from "./YarnSpinnerParser";
+import { Line_group_statementContext } from "./YarnSpinnerParser";
+import { Line_group_itemContext } from "./YarnSpinnerParser";
 import { Declare_statementContext } from "./YarnSpinnerParser";
+import { Enum_statementContext } from "./YarnSpinnerParser";
+import { Enum_case_statementContext } from "./YarnSpinnerParser";
 import { Jump_statementContext } from "./YarnSpinnerParser";
+import { Return_statementContext } from "./YarnSpinnerParser";
+import { Once_statementContext } from "./YarnSpinnerParser";
+import { Once_primary_clauseContext } from "./YarnSpinnerParser";
+import { Once_alternate_clauseContext } from "./YarnSpinnerParser";
+import { Structured_commandContext } from "./YarnSpinnerParser";
+import { Structured_command_valueContext } from "./YarnSpinnerParser";
 
 
 /**
@@ -55,6 +76,22 @@ import { Jump_statementContext } from "./YarnSpinnerParser";
  * operations with no return type.
  */
 export interface YarnSpinnerParserVisitor<Result> extends ParseTreeVisitor<Result> {
+	/**
+	 * Visit a parse tree produced by the `lineCondition`
+	 * labeled alternative in `YarnSpinnerParser.line_condition`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitLineCondition?: (ctx: LineConditionContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by the `lineOnceCondition`
+	 * labeled alternative in `YarnSpinnerParser.line_condition`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitLineOnceCondition?: (ctx: LineOnceConditionContext) => Result;
+
 	/**
 	 * Visit a parse tree produced by the `valueNumber`
 	 * labeled alternative in `YarnSpinnerParser.value`.
@@ -96,20 +133,20 @@ export interface YarnSpinnerParserVisitor<Result> extends ParseTreeVisitor<Resul
 	visitValueString?: (ctx: ValueStringContext) => Result;
 
 	/**
-	 * Visit a parse tree produced by the `valueNull`
-	 * labeled alternative in `YarnSpinnerParser.value`.
-	 * @param ctx the parse tree
-	 * @return the visitor result
-	 */
-	visitValueNull?: (ctx: ValueNullContext) => Result;
-
-	/**
 	 * Visit a parse tree produced by the `valueFunc`
 	 * labeled alternative in `YarnSpinnerParser.value`.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	visitValueFunc?: (ctx: ValueFuncContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by the `valueTypeMemberReference`
+	 * labeled alternative in `YarnSpinnerParser.value`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitValueTypeMemberReference?: (ctx: ValueTypeMemberReferenceContext) => Result;
 
 	/**
 	 * Visit a parse tree produced by the `expParens`
@@ -184,6 +221,38 @@ export interface YarnSpinnerParserVisitor<Result> extends ParseTreeVisitor<Resul
 	visitExpValue?: (ctx: ExpValueContext) => Result;
 
 	/**
+	 * Visit a parse tree produced by the `jumpToNodeName`
+	 * labeled alternative in `YarnSpinnerParser.jump_statement`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitJumpToNodeName?: (ctx: JumpToNodeNameContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by the `jumpToExpression`
+	 * labeled alternative in `YarnSpinnerParser.jump_statement`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitJumpToExpression?: (ctx: JumpToExpressionContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by the `detourToNodeName`
+	 * labeled alternative in `YarnSpinnerParser.jump_statement`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitDetourToNodeName?: (ctx: DetourToNodeNameContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by the `detourToExpression`
+	 * labeled alternative in `YarnSpinnerParser.jump_statement`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitDetourToExpression?: (ctx: DetourToExpressionContext) => Result;
+
+	/**
 	 * Visit a parse tree produced by `YarnSpinnerParser.dialogue`.
 	 * @param ctx the parse tree
 	 * @return the visitor result
@@ -205,11 +274,32 @@ export interface YarnSpinnerParserVisitor<Result> extends ParseTreeVisitor<Resul
 	visitNode?: (ctx: NodeContext) => Result;
 
 	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.title_header`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitTitle_header?: (ctx: Title_headerContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.when_header`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitWhen_header?: (ctx: When_headerContext) => Result;
+
+	/**
 	 * Visit a parse tree produced by `YarnSpinnerParser.header`.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	visitHeader?: (ctx: HeaderContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.header_when_expression`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitHeader_when_expression?: (ctx: Header_when_expressionContext) => Result;
 
 	/**
 	 * Visit a parse tree produced by `YarnSpinnerParser.body`.
@@ -282,6 +372,13 @@ export interface YarnSpinnerParserVisitor<Result> extends ParseTreeVisitor<Resul
 	visitFunction_call?: (ctx: Function_callContext) => Result;
 
 	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.typeMemberReference`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitTypeMemberReference?: (ctx: TypeMemberReferenceContext) => Result;
+
+	/**
 	 * Visit a parse tree produced by `YarnSpinnerParser.if_statement`.
 	 * @param ctx the parse tree
 	 * @return the visitor result
@@ -352,6 +449,20 @@ export interface YarnSpinnerParserVisitor<Result> extends ParseTreeVisitor<Resul
 	visitShortcut_option?: (ctx: Shortcut_optionContext) => Result;
 
 	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.line_group_statement`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitLine_group_statement?: (ctx: Line_group_statementContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.line_group_item`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitLine_group_item?: (ctx: Line_group_itemContext) => Result;
+
+	/**
 	 * Visit a parse tree produced by `YarnSpinnerParser.declare_statement`.
 	 * @param ctx the parse tree
 	 * @return the visitor result
@@ -359,10 +470,66 @@ export interface YarnSpinnerParserVisitor<Result> extends ParseTreeVisitor<Resul
 	visitDeclare_statement?: (ctx: Declare_statementContext) => Result;
 
 	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.enum_statement`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitEnum_statement?: (ctx: Enum_statementContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.enum_case_statement`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitEnum_case_statement?: (ctx: Enum_case_statementContext) => Result;
+
+	/**
 	 * Visit a parse tree produced by `YarnSpinnerParser.jump_statement`.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	visitJump_statement?: (ctx: Jump_statementContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.return_statement`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitReturn_statement?: (ctx: Return_statementContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.once_statement`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitOnce_statement?: (ctx: Once_statementContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.once_primary_clause`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitOnce_primary_clause?: (ctx: Once_primary_clauseContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.once_alternate_clause`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitOnce_alternate_clause?: (ctx: Once_alternate_clauseContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.structured_command`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitStructured_command?: (ctx: Structured_commandContext) => Result;
+
+	/**
+	 * Visit a parse tree produced by `YarnSpinnerParser.structured_command_value`.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	visitStructured_command_value?: (ctx: Structured_command_valueContext) => Result;
 }
 
